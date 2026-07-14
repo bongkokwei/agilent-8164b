@@ -94,6 +94,85 @@ class Agilent8164B:
         metres = float(self._query(f"{self._prefix()}:WAV?"))
         return metres * 1e9
 
+    # -- native wavelength sweep --------------------------------------
+    # Uses the module's built-in sweep engine (:WAV:SWE subsystem) rather
+    # than stepping the wavelength from the host.
+    _SWEEP_MODE = {
+        "step": "STEP",
+        "stepped": "STEP",
+        "continuous": "CONT",
+        "cont": "CONT",
+        "manual": "MAN",
+    }
+
+    _SWEEP_REPEAT = {
+        "oneway": "ONEW",
+        "one_way": "ONEW",
+        "twoway": "TWOW",
+        "two_way": "TWOW",
+    }
+
+    _SWEEP_STATE = {
+        0: "stopped",
+        1: "running",
+        2: "paused",
+        3: "waiting_for_trigger",
+    }
+
+    def _sweep_prefix(self) -> str:
+        return f"{self._prefix()}:WAV:SWE"
+
+    def configure_sweep(
+        self,
+        start_nm: float,
+        stop_nm: float,
+        step_nm: float = 1.0,
+        speed_nm_s: float = None,
+        dwell_s: float = None,
+        cycles: int = 1,
+        mode: str = "step",
+        repeat: str = "oneway",
+    ) -> None:
+        """Configure (but do not start) a native wavelength sweep.
+
+        mode: 'step' (stepped sweep, uses step_nm/dwell_s) or 'continuous'
+        (uses speed_nm_s). repeat: 'oneway' or 'twoway'.
+        """
+        prefix = self._sweep_prefix()
+        self._write(f"{prefix}:MODE {self._SWEEP_MODE[mode.lower()]}")
+        self._write(f"{prefix}:STAR {start_nm}NM")
+        self._write(f"{prefix}:STOP {stop_nm}NM")
+        self._write(f"{prefix}:REP {self._SWEEP_REPEAT[repeat.lower()]}")
+        self._write(f"{prefix}:CYCL {cycles}")
+        if mode.lower() in ("step", "stepped"):
+            self._write(f"{prefix}:STEP {step_nm}NM")
+            if dwell_s is not None:
+                self._write(f"{prefix}:DWEL {dwell_s}S")
+        elif mode.lower() in ("continuous", "cont"):
+            if speed_nm_s is not None:
+                self._write(f"{prefix}:SPE {speed_nm_s}NM/S")
+
+    def start_sweep(self) -> None:
+        self._write(f"{self._sweep_prefix()}:STAT START")
+
+    def stop_sweep(self) -> None:
+        self._write(f"{self._sweep_prefix()}:STAT STOP")
+
+    def pause_sweep(self) -> None:
+        self._write(f"{self._sweep_prefix()}:STAT PAUS")
+
+    def continue_sweep(self) -> None:
+        self._write(f"{self._sweep_prefix()}:STAT CONT")
+
+    def get_sweep_state(self) -> str:
+        """Returns one of 'stopped', 'running', 'paused',
+        'waiting_for_trigger'."""
+        code = int(float(self._query(f"{self._sweep_prefix()}:STAT?")))
+        return self._SWEEP_STATE.get(code, str(code))
+
+    def is_sweeping(self) -> bool:
+        return self.get_sweep_state() == "running"
+
     # -- dual output path (High Power / Low SSE) ----------------------
     # Applies to tunable laser modules with two physical outputs.
     # This is distinct from dual-WAVELENGTH sources ([l] parameter above).

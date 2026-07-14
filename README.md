@@ -56,23 +56,28 @@ with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
 | `set_power(value, unit)` / `get_power()` | Set/get output power (`dBm`, `mW`, `uW`, `nW`) |
 | `set_power_unit(unit)` / `get_power_unit()` | Set/get the power display unit |
 | `set_output_path(path)` / `get_output_path()` | Set/get output path (`high`, `lowsse`, `both_high`, `both_low`) — for dual-output modules |
+| `configure_sweep(start_nm, stop_nm, ...)` | Configure the module's built-in wavelength sweep (`mode='step'` or `'continuous'`, `repeat='oneway'` or `'twoway'`) |
+| `start_sweep()` / `stop_sweep()` / `pause_sweep()` / `continue_sweep()` | Control a configured sweep |
+| `get_sweep_state()` / `is_sweeping()` | Query sweep status (`stopped`, `running`, `paused`, `waiting_for_trigger`) |
 | `check_errors()` / `flush_errors()` | Read the SCPI error queue |
 | `close()` | Close the VISA session (also called automatically via `with`) |
 
 ## Examples
 
 See [`examples/wavelength_scan.py`](examples/wavelength_scan.py) for a
-wavelength sweep script. Edit the parameters in the `CONFIG` section at the
-top of the file (VISA resource string, scan range/step, dwell time, output
-power, and output path), then run:
+wavelength sweep script. It drives the module's native sweep engine
+(`configure_sweep()` / `start_sweep()`) rather than stepping the wavelength
+from the host. Edit the parameters in the `CONFIG` section at the top of the
+file (VISA resource string, scan range, sweep mode/step/speed, output power,
+and output path), then run:
 
 ```bash
 python examples/wavelength_scan.py
 ```
 
-The script steps the laser across the configured wavelength range, prints
-the target/actual wavelength and measured power at each step, and (unless
-disabled) writes the results to a CSV file.
+The script starts a sweep, polls wavelength and measured power while it
+runs, prints each sample, and (unless disabled) writes the results to a
+CSV file.
 
 ## Project layout
 
