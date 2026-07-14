@@ -112,13 +112,6 @@ class Agilent8164B:
         "two_way": "TWOW",
     }
 
-    _SWEEP_STATE = {
-        0: "stopped",
-        1: "running",
-        2: "paused",
-        3: "waiting_for_trigger",
-    }
-
     def _sweep_prefix(self) -> str:
         return f"{self._prefix()}:WAV:SWE"
 
@@ -164,14 +157,19 @@ class Agilent8164B:
     def continue_sweep(self) -> None:
         self._write(f"{self._sweep_prefix()}:STAT CONT")
 
-    def get_sweep_state(self) -> str:
-        """Returns one of 'stopped', 'running', 'paused',
-        'waiting_for_trigger'."""
-        code = int(float(self._query(f"{self._sweep_prefix()}:STAT?")))
-        return self._SWEEP_STATE.get(code, str(code))
-
     def is_sweeping(self) -> bool:
-        return self.get_sweep_state() == "running"
+        """Returns True while a sweep is running (the instrument only
+        reports a running/not-running state, not paused/waiting)."""
+        return bool(int(float(self._query(f"{self._sweep_prefix()}:STAT?"))))
+
+    def check_sweep_params(self) -> str:
+        """Validate the currently configured sweep parameters.
+
+        Returns "OK" if the sweep is configured correctly, otherwise a
+        string describing the configuration problem (e.g. start/stop
+        wavelength, step size, trigger frequency, or cycle time issues).
+        """
+        return self._query(f"{self._sweep_prefix()}:CHEC?")
 
     # -- dual output path (High Power / Low SSE) ----------------------
     # Applies to tunable laser modules with two physical outputs.

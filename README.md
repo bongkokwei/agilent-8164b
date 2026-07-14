@@ -58,7 +58,8 @@ with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
 | `set_output_path(path)` / `get_output_path()` | Set/get output path (`high`, `lowsse`, `both_high`, `both_low`) — for dual-output modules |
 | `configure_sweep(start_nm, stop_nm, ...)` | Configure the module's built-in wavelength sweep (`mode='step'` or `'continuous'`, `repeat='oneway'` or `'twoway'`) |
 | `start_sweep()` / `stop_sweep()` / `pause_sweep()` / `continue_sweep()` | Control a configured sweep |
-| `get_sweep_state()` / `is_sweeping()` | Query sweep status (`stopped`, `running`, `paused`, `waiting_for_trigger`) |
+| `is_sweeping()` | True while the sweep is running |
+| `check_sweep_params()` | Validate the configured sweep, returns `"OK"` or a description of the problem |
 | `check_errors()` / `flush_errors()` | Read the SCPI error queue |
 | `close()` | Close the VISA session (also called automatically via `with`) |
 
