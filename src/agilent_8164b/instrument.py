@@ -146,18 +146,3 @@ class Agilent8164B:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
-
-if __name__ == "__main__":
-    # Example usage
-    with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
-        print(laser.identify())
-        laser.set_wavelength_nm(1550.0)
-        laser.set_power(1.5, unit="dBm")
-        laser.set_output_path("high")  # or "lowsse", "both_high", "both_low"
-        laser.laser_on()
-        print("Wavelength (nm):", laser.get_wavelength_nm())
-        print("Power:", laser.get_power(), laser.get_power_unit())
-        print("Output path:", laser.get_output_path())
-        print("Error queue:", laser.flush_errors())
-        # laser.laser_off()
