@@ -61,6 +61,10 @@ def main():
             repeat=REPEAT_MODE,
         )
 
+        params_ok = laser.check_sweep_params()
+        if params_ok != "OK":
+            raise RuntimeError(f"Sweep configuration problem: {params_ok}")
+
         laser.laser_on()
         laser.start_sweep()
 
