@@ -169,7 +169,13 @@ class Agilent8164B:
         string describing the configuration problem (e.g. start/stop
         wavelength, step size, trigger frequency, or cycle time issues).
         """
-        return self._query(f"{self._sweep_prefix()}:CHEC?")
+        response = self._query(f"{self._sweep_prefix()}:CHEC?")
+        code, _, message = response.partition(",")
+        try:
+            is_ok = int(code) == 0
+        except ValueError:
+            is_ok = False
+        return "OK" if is_ok else message.strip() or response
 
     # -- dual output path (High Power / Low SSE) ----------------------
     # Applies to tunable laser modules with two physical outputs.
