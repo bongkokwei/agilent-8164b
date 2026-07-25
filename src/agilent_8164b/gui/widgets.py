@@ -165,7 +165,14 @@ class ReadoutPanel(QGroupBox):
         grid.addWidget(QLabel("Wavelength"), 1, 0)
         grid.addWidget(self.wavelength_value, 1, 1)
         grid.addWidget(QLabel("nm"), 1, 2)
-        grid.addWidget(QLabel("Power"), 2, 0)
+        # ":SOUR:POW?" reads back the commanded power, not a measurement —
+        # the source module has no detector — so the label says so.
+        power_caption = QLabel("Power (set)")
+        power_caption.setToolTip(
+            "Read back from the source, i.e. the power the module has been "
+            "told to emit. It is not a measurement."
+        )
+        grid.addWidget(power_caption, 2, 0)
         grid.addWidget(self.power_value, 2, 1)
         self.power_unit_label = QLabel("dBm")
         grid.addWidget(self.power_unit_label, 2, 2)
@@ -358,9 +365,6 @@ class SweepPanel(QGroupBox):
         self.repeat_combo = QComboBox()
         self.repeat_combo.addItems(["One way", "Two way"])
 
-        self.clear_on_start_check = QCheckBox("Clear plot when a sweep starts")
-        self.clear_on_start_check.setChecked(True)
-
         self.check_button = QPushButton("Check")
         self.check_button.setToolTip("Validate the parameters without starting")
         self.start_button = QPushButton("Start")
@@ -388,7 +392,6 @@ class SweepPanel(QGroupBox):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(self.clear_on_start_check)
         layout.addLayout(button_row)
         layout.addWidget(self.check_label)
 

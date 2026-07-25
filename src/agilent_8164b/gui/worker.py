@@ -51,7 +51,6 @@ class LaserWorker(QObject):
     error = pyqtSignal(str)
     status = pyqtSignal(str)
     state_polled = pyqtSignal(dict)          # see _poll() for the keys
-    sample_acquired = pyqtSignal(float, float)   # wavelength_nm, power
     sweep_running_changed = pyqtSignal(bool)
     sweep_checked = pyqtSignal(str)          # "OK" or a problem description
 
@@ -331,8 +330,6 @@ class LaserWorker(QObject):
             "sweeping": sweeping,
         })
 
-        if sweeping:
-            self.sample_acquired.emit(wavelength_nm, power)
         if sweeping != self._was_sweeping:
             self._was_sweeping = sweeping
             self.sweep_running_changed.emit(sweeping)

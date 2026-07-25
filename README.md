@@ -74,23 +74,29 @@ agilent-8164b-gui                       # or: python -m agilent_8164b.gui.app
 
 ![The GUI during a wavelength sweep](docs/gui_screenshot.png)
 
-The window is split into a control column and a results pane:
+The GUI is a front end to `Agilent8164B` and nothing more: every control maps
+onto a method of that class, and everything it displays is read back from the
+laser source module. It measures nothing, because the module has no detector.
 
 - **Connection** — pick a VISA resource (`Scan` lists what the backend can see),
   set the slot, channel and timeout, then connect. The `*IDN?` response is shown
   underneath, and everything else stays disabled until a session is open.
-- **Readout** — large wavelength and power values polled straight from the
-  instrument, plus the output path and sweep state. A red banner appears
-  whenever the output is emitting.
+- **Readout** — wavelength (`:WAV?`) and sweep state polled a few times a second,
+  plus the output path. A red banner appears whenever the output is emitting.
+  "Power (set)" is a `:SOUR:POW?` readback of the commanded power — it is the
+  setpoint, not a measurement, and does not respond to anything downstream of
+  the output connector.
 - **Output** — laser on/off, wavelength, power (`dBm`/`mW`/`uW`/`nW`), the unit
   the instrument reports in, and the output path for dual-output modules.
 - **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`
   runs `:WAV:SWE:CHEC?` and reports the problem in place; `Start` re-checks
   before it will start, so a bad range never reaches the hardware.
-- **Live trace** — measured power against wavelength, updated as the sweep
-  runs, exportable to CSV.
 - **Log** — the driver's own log messages, with a tick box to include the raw
   SCPI traffic.
+
+To record a transmission spectrum you need a power meter module and the
+`:SENSe` subsystem, which this driver does not cover. `examples/wavelength_scan.py`
+has the same limitation: the "power" column it writes is the source setpoint.
 
 All instrument I/O runs on a worker thread, so the window never freezes while
 the mainframe is answering. The output is switched off when you disconnect or
@@ -100,8 +106,9 @@ laser asks for confirmation (switch that off under *Instrument*).
 ### Trying it without hardware
 
 `--simulate` swaps the driver for a simulated instrument that sweeps in real
-time and produces a synthetic spectrum, so you can explore the interface with
-no mainframe or VISA backend installed:
+time, so you can explore the interface with no mainframe or VISA backend
+installed. It fabricates no readings — it reports back only what it was told,
+exactly as the real module does:
 
 ```bash
 agilent-8164b-gui --simulate
@@ -123,9 +130,10 @@ and output path), then run:
 python examples/wavelength_scan.py
 ```
 
-The script starts a sweep, polls wavelength and measured power while it
-runs, logs each sample, and (unless disabled) writes the results to a
-CSV file.
+The script starts a sweep, polls the wavelength while it runs, logs each
+sample, and (unless disabled) writes the results to a CSV file. Note that its
+power column is the source setpoint read back with `get_power()`, not a
+measurement — see the note under [GUI](#gui).
 
 ## Logging
 
@@ -151,7 +159,6 @@ src/agilent_8164b/     # installable package
     app.py             # CLI entry point (agilent-8164b-gui)
     main_window.py     # window, menus, worker thread wiring
     widgets.py         # connection/readout/output/sweep panels
-    plot.py            # live trace and CSV export
     worker.py          # instrument worker (all VISA I/O lives here)
     simulator.py       # software stand-in used by --simulate and the tests
 examples/

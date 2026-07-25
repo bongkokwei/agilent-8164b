@@ -3,13 +3,13 @@
 Lets the GUI be developed, demonstrated and tested on a machine with no
 mainframe attached (and no VISA backend installed). It mimics the driver's
 public API closely enough that the worker thread cannot tell the difference,
-including a sweep engine that advances the wavelength in real time and a
-synthetic transmission spectrum so the live plot shows something plausible.
+including a sweep engine that advances the wavelength in real time. It
+invents no measurements: like the real module it only ever reports back what
+it was told to do.
 """
 
 import logging
 import math
-import random
 import time
 
 logger = logging.getLogger(__name__)
@@ -114,23 +114,16 @@ class SimulatedAgilent8164B:
             self._power_setpoint_dbm = 10.0 * math.log10(milliwatts)
 
     def get_power(self) -> float:
-        """Synthetic measured power: setpoint shaped by a fake resonance."""
-        self._advance_sweep()
-        dbm = self._power_setpoint_dbm - self._synthetic_dip_db()
-        dbm += random.gauss(0.0, 0.02)  # a little detector noise
-        if not self._laser_on:
-            dbm = -80.0
-        if self._power_unit == "dBm":
-            return dbm
-        return 10 ** (dbm / 10.0) * 1e-3  # watts
+        """Read back the source power setting.
 
-    def _synthetic_dip_db(self) -> float:
-        """Two Lorentzian notches so the live trace has visible features."""
-        depth_db = 0.0
-        for centre_nm, depth, fwhm_nm in ((1535.0, 8.0, 0.4), (1560.5, 5.0, 0.25)):
-            detuning = 2.0 * (self._wavelength_nm - centre_nm) / fwhm_nm
-            depth_db += depth / (1.0 + detuning**2)
-        return depth_db
+        The real ``:SOUR:POW?`` returns the commanded output power, not a
+        measurement — a tunable laser source module has no detector. So this
+        returns the setpoint unchanged, whatever the wavelength and whether
+        or not the output is enabled.
+        """
+        if self._power_unit == "dBm":
+            return self._power_setpoint_dbm
+        return 10 ** (self._power_setpoint_dbm / 10.0) * 1e-3  # watts
 
     # -- output path ---------------------------------------------------
     def set_output_path(self, path: str) -> None:

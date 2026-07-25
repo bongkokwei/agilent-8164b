@@ -81,12 +81,18 @@ def test_simulator_rejects_inverted_range():
     assert sim.check_sweep_params() != "OK"
 
 
-def test_simulator_reports_dark_when_output_off():
+def test_simulator_power_is_a_setpoint_readback():
+    """There is no detector, so get_power() must not vary with the sweep."""
     sim = SimulatedAgilent8164B()
     sim.set_power(3.0, unit="dBm")
-    assert sim.get_power() < -50.0
     sim.laser_on()
-    assert sim.get_power() == pytest.approx(3.0, abs=1.5)
+    sim.configure_sweep(1530.0, 1565.0, step_nm=0.5, dwell_s=0.001)
+    sim.start_sweep()
+    readings = []
+    for _ in range(5):
+        sim.get_wavelength_nm()
+        readings.append(sim.get_power())
+    assert readings == [3.0] * 5
 
 
 # -- panels (no instrument involved) -----------------------------------
@@ -144,7 +150,7 @@ def test_setting_wavelength_updates_readout(qapp, window):
     assert "1543.21" in window.readout_panel.wavelength_value.text()
 
 
-def test_sweep_collects_points_and_stops(qapp, window):
+def test_sweep_runs_then_returns_to_idle(qapp, window):
     _connect(qapp, window)
     window.output_panel.laser_button.setChecked(True)
     window.sweep_panel.start_spin.setValue(1550.0)
@@ -155,6 +161,10 @@ def test_sweep_collects_points_and_stops(qapp, window):
 
     _spin(qapp, 200)
     assert window.sweep_panel.check_label.text() == "Parameters OK"
+    assert window.worker._inst.is_sweeping()
+    # While running, only the transport controls are live.
+    assert not window.sweep_panel.start_button.isEnabled()
+    assert window.sweep_panel.stop_button.isEnabled()
 
     for _ in range(100):
         _spin(qapp, 50)
@@ -162,9 +172,8 @@ def test_sweep_collects_points_and_stops(qapp, window):
             break
     _spin(qapp, 200)
 
-    assert len(window.plot_panel._powers) > 3
-    assert all(1549.9 <= wl <= 1551.1 for wl in window.plot_panel._wavelengths_nm)
-    # The transport buttons return to the idle arrangement afterwards.
+    wavelength_nm = window.worker._inst.get_wavelength_nm()
+    assert 1549.9 <= wavelength_nm <= 1551.1
     assert window.sweep_panel.start_button.isEnabled()
     assert not window.sweep_panel.stop_button.isEnabled()
 

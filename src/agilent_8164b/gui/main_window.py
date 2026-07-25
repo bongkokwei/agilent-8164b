@@ -7,16 +7,15 @@ import logging
 from PyQt6.QtCore import QMetaObject, QObject, QSettings, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QGroupBox,
     QLabel,
     QMainWindow,
     QMessageBox,
     QSplitter,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from .plot import SweepPlot
 from .widgets import ConnectionPanel, LogPanel, OutputPanel, ReadoutPanel, SweepPanel
 from .worker import LaserWorker
 
@@ -79,7 +78,6 @@ class LaserMainWindow(QMainWindow):
         self.readout_panel = ReadoutPanel()
         self.output_panel = OutputPanel()
         self.sweep_panel = SweepPanel()
-        self.plot_panel = SweepPlot()
         self.log_panel = LogPanel()
 
         left_column = QWidget()
@@ -91,13 +89,13 @@ class LaserMainWindow(QMainWindow):
         left_layout.addWidget(self.sweep_panel)
         left_layout.addStretch(1)
 
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.plot_panel, "Live trace")
-        self.tabs.addTab(self.log_panel, "Log")
+        log_box = QGroupBox("Log")
+        log_layout = QVBoxLayout(log_box)
+        log_layout.addWidget(self.log_panel)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_column)
-        splitter.addWidget(self.tabs)
+        splitter.addWidget(log_box)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([420, 760])
@@ -115,11 +113,6 @@ class LaserMainWindow(QMainWindow):
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
-        export_action = QAction("&Export trace as CSV…", self)
-        export_action.setShortcut(QKeySequence.StandardKey.Save)
-        export_action.triggered.connect(self.plot_panel.export_csv)
-        file_menu.addAction(export_action)
-        file_menu.addSeparator()
         quit_action = QAction("&Quit", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
@@ -170,7 +163,6 @@ class LaserMainWindow(QMainWindow):
         self.output_panel.wavelength_requested.connect(self.worker.set_wavelength_nm)
         self.output_panel.power_requested.connect(self.worker.set_power)
         self.output_panel.power_unit_requested.connect(self.worker.set_power_unit)
-        self.output_panel.power_unit_requested.connect(self.plot_panel.set_power_unit)
         self.output_panel.output_path_requested.connect(self.worker.set_output_path)
 
         self.sweep_panel.start_requested.connect(self._on_sweep_start)
@@ -186,7 +178,6 @@ class LaserMainWindow(QMainWindow):
         self.worker.error.connect(self._on_error)
         self.worker.status.connect(self._on_status)
         self.worker.state_polled.connect(self._on_state)
-        self.worker.sample_acquired.connect(self.plot_panel.add_sample)
         self.worker.sweep_running_changed.connect(self.sweep_panel.set_sweep_running)
         self.worker.sweep_checked.connect(self.sweep_panel.show_check_result)
 
@@ -265,9 +256,6 @@ class LaserMainWindow(QMainWindow):
         self.laser_on_requested.emit(on)
 
     def _on_sweep_start(self, config) -> None:
-        if self.sweep_panel.clear_on_start_check.isChecked():
-            self.plot_panel.clear()
-        self.tabs.setCurrentWidget(self.plot_panel)
         self.sweep_start_requested.emit(config)
 
     def _on_sweep_check(self, config) -> None:
