@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 
-from PyQt6.QtCore import QMetaObject, QObject, QSettings, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QMetaObject, QSettings, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QGroupBox,
@@ -22,24 +23,31 @@ from .worker import LaserWorker
 logger = logging.getLogger(__name__)
 
 
-class _LogBridge(QObject):
-    """Carries log records from any thread onto the GUI thread."""
-
-    message = pyqtSignal(str)
-
-
 class QtLogHandler(logging.Handler):
-    """Logging handler that forwards formatted records to a Qt signal."""
+    """Collects log records for the GUI to pick up on its own thread.
 
-    def __init__(self):
+    The driver logs from the worker thread, so this must not touch a Qt
+    object: emitting a signal from here posts an event that can outlive the
+    widget it targets and abort the process. Instead records queue up in a
+    deque — ``append``/``popleft`` are atomic under the GIL — and the window
+    drains it from a timer. ``maxlen`` bounds memory if the GUI is busy.
+    """
+
+    def __init__(self, capacity: int = 2000):
         super().__init__()
-        self.bridge = _LogBridge()
+        self.records: deque[str] = deque(maxlen=capacity)
 
     def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self.bridge.message.emit(self.format(record))
-        except RuntimeError:
-            pass  # the window went away while a record was in flight
+        self.records.append(self.format(record))
+
+    def drain(self) -> list[str]:
+        """Pop everything queued so far. Call from the GUI thread only."""
+        messages = []
+        while True:
+            try:
+                messages.append(self.records.popleft())
+            except IndexError:
+                return messages
 
 
 class LaserMainWindow(QMainWindow):
@@ -51,20 +59,17 @@ class LaserMainWindow(QMainWindow):
     sweep_start_requested = pyqtSignal(object)
     sweep_configure_requested = pyqtSignal(object)
 
-    def __init__(self, simulate: bool = False, poll_interval_ms: int = 200):
+    def __init__(self, poll_interval_ms: int = 200):
         super().__init__()
-        self._simulate = simulate
         self._connected = False
         self._confirm_output = True
 
-        self.setWindowTitle(
-            "Agilent 8164B laser control" + (" — SIMULATION" if simulate else "")
-        )
-        self.resize(1180, 760)
+        self.setWindowTitle("Agilent 8164B laser control")
+        self.resize(980, 720)
 
         self._build_ui()
         self._build_menus()
-        self._start_worker(simulate, poll_interval_ms)
+        self._start_worker(poll_interval_ms)
         self._connect_signals()
         self._install_log_handler()
         self._restore_settings()
@@ -103,13 +108,6 @@ class LaserMainWindow(QMainWindow):
 
         self.status_label = QLabel("Not connected")
         self.statusBar().addWidget(self.status_label, 1)
-        if self._simulate:
-            badge = QLabel("SIMULATION — no hardware")
-            badge.setStyleSheet(
-                "background-color: #ef6c00; color: white; padding: 1px 6px;"
-                " border-radius: 3px;"
-            )
-            self.statusBar().addPermanentWidget(badge)
 
     def _build_menus(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
@@ -146,9 +144,9 @@ class LaserMainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
-    def _start_worker(self, simulate: bool, poll_interval_ms: int) -> None:
+    def _start_worker(self, poll_interval_ms: int) -> None:
         self.thread = QThread(self)
-        self.worker = LaserWorker(simulate=simulate, poll_interval_ms=poll_interval_ms)
+        self.worker = LaserWorker(poll_interval_ms=poll_interval_ms)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.start)
         self.thread.start()
@@ -193,10 +191,19 @@ class LaserMainWindow(QMainWindow):
             logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s",
                               datefmt="%H:%M:%S")
         )
-        self.log_handler.bridge.message.connect(self.log_panel.append)
         package_logger = logging.getLogger("agilent_8164b")
         package_logger.addHandler(self.log_handler)
         package_logger.setLevel(logging.INFO)
+
+        # Drained on the GUI thread; the handler itself never touches Qt.
+        self.log_timer = QTimer(self)
+        self.log_timer.setInterval(100)
+        self.log_timer.timeout.connect(self._drain_log)
+        self.log_timer.start()
+
+    def _drain_log(self) -> None:
+        for message in self.log_handler.drain():
+            self.log_panel.append(message)
 
     # -- worker helpers ------------------------------------------------
     def _invoke_worker(self, slot_name: str) -> None:
@@ -355,6 +362,14 @@ class LaserMainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Ok:
                 event.ignore()
                 return
+
+        # Committed to closing. Stop listening to the worker first: its
+        # signals are queued from the other thread, and any that arrive after
+        # this window is destroyed would call slots on a dead C++ object,
+        # which aborts the process rather than raising.
+        self.worker.blockSignals(True)
+
+        if self._connected:
             # Block until the worker has actually switched the laser off,
             # otherwise the process can exit with the output still enabled.
             QMetaObject.invokeMethod(
@@ -363,7 +378,10 @@ class LaserMainWindow(QMainWindow):
             )
 
         self._save_settings()
+        # Detach from logging before the thread stops, so nothing queues up
+        # against a window that is on its way out.
         logging.getLogger("agilent_8164b").removeHandler(self.log_handler)
+        self.log_timer.stop()
         self.thread.quit()
         if not self.thread.wait(5000):
             logger.warning("Worker thread did not stop cleanly; terminating.")

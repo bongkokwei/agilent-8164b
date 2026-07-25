@@ -54,10 +54,9 @@ class LaserWorker(QObject):
     sweep_running_changed = pyqtSignal(bool)
     sweep_checked = pyqtSignal(str)          # "OK" or a problem description
 
-    def __init__(self, simulate: bool = False, poll_interval_ms: int = 200):
+    def __init__(self, poll_interval_ms: int = 200):
         super().__init__()
         self._inst = None
-        self._simulate = simulate
         self._poll_interval_ms = poll_interval_ms
         self._poll_timer: Optional[QTimer] = None
         self._was_sweeping = False
@@ -79,9 +78,6 @@ class LaserWorker(QObject):
     @pyqtSlot()
     def list_resources(self) -> None:
         """Enumerate VISA resources (blocking, hence worker-side)."""
-        if self._simulate:
-            self.resources_listed.emit(["SIM::INSTR"])
-            return
         try:
             import pyvisa
 
@@ -98,18 +94,11 @@ class LaserWorker(QObject):
             self.error.emit("Already connected — disconnect first.")
             return
         try:
-            if self._simulate:
-                from .simulator import SimulatedAgilent8164B
+            from ..instrument import Agilent8164B
 
-                self._inst = SimulatedAgilent8164B(
-                    resource_name, slot=slot, channel=channel, timeout_ms=timeout_ms
-                )
-            else:
-                from ..instrument import Agilent8164B
-
-                self._inst = Agilent8164B(
-                    resource_name, slot=slot, channel=channel, timeout_ms=timeout_ms
-                )
+            self._inst = Agilent8164B(
+                resource_name, slot=slot, channel=channel, timeout_ms=timeout_ms
+            )
             idn = self._inst.identify()
             self._power_unit = self._inst.get_power_unit()
         except Exception as exc:  # noqa: BLE001

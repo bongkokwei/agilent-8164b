@@ -74,6 +74,8 @@ agilent-8164b-gui                       # or: python -m agilent_8164b.gui.app
 
 ![The GUI during a wavelength sweep](docs/gui_screenshot.png)
 
+*(Screenshot taken against the test suite's stubbed VISA session, hence the placeholder serial number.)*
+
 The GUI is a front end to `Agilent8164B` and nothing more: every control maps
 onto a method of that class, and everything it displays is read back from the
 laser source module. It measures nothing, because the module has no detector.
@@ -103,19 +105,8 @@ the mainframe is answering. The output is switched off when you disconnect or
 close the window, `Ctrl+Shift+O` is a panic "output off now", and enabling the
 laser asks for confirmation (switch that off under *Instrument*).
 
-### Trying it without hardware
-
-`--simulate` swaps the driver for a simulated instrument that sweeps in real
-time, so you can explore the interface with no mainframe or VISA backend
-installed. It fabricates no readings — it reports back only what it was told,
-exactly as the real module does:
-
-```bash
-agilent-8164b-gui --simulate
-```
-
-Other options: `--resource`, `--slot`, `--channel`, `--poll-interval MS`
-(default 200), and `--debug` to log every SCPI exchange.
+Other command-line options: `--resource`, `--slot`, `--channel`,
+`--poll-interval MS` (default 200), and `--debug` to log every SCPI exchange.
 
 ## Examples
 
@@ -160,16 +151,17 @@ src/agilent_8164b/     # installable package
     main_window.py     # window, menus, worker thread wiring
     widgets.py         # connection/readout/output/sweep panels
     worker.py          # instrument worker (all VISA I/O lives here)
-    simulator.py       # software stand-in used by --simulate and the tests
 examples/
   wavelength_scan.py   # wavelength scan example with editable parameters
 tests/
-  test_gui.py          # GUI tests, run against the simulator
+  conftest.py          # stubbed VISA session used by the tests
+  test_gui.py          # GUI tests
 ```
 
 ## Tests
 
-The GUI tests drive the real window against the simulated instrument, so they
+The tests drive the real window and the real driver, stubbing only the VISA
+session underneath, so the SCPI the driver builds is checked for real. They
 need neither hardware nor a display:
 
 ```bash

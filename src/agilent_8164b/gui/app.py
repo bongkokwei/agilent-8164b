@@ -17,11 +17,6 @@ def parse_args(argv=None) -> argparse.Namespace:
         description="PyQt6 control panel for the Agilent/Keysight 8164B tunable laser.",
     )
     parser.add_argument(
-        "--simulate",
-        action="store_true",
-        help="run against a simulated instrument (no VISA backend or hardware needed)",
-    )
-    parser.add_argument(
         "--resource",
         default=None,
         help="pre-fill the VISA resource string, e.g. GPIB0::20::INSTR",
@@ -56,13 +51,9 @@ def main(argv=None) -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Agilent 8164B laser control")
 
-    window = LaserMainWindow(
-        simulate=args.simulate, poll_interval_ms=args.poll_interval
-    )
+    window = LaserMainWindow(poll_interval_ms=args.poll_interval)
     if args.resource:
         window.connection_panel.resource_combo.setCurrentText(args.resource)
-    elif args.simulate:
-        window.connection_panel.resource_combo.setCurrentText("SIM::INSTR")
     if args.slot is not None:
         window.connection_panel.slot_spin.setValue(args.slot)
     if args.channel is not None:
