@@ -77,8 +77,22 @@ python examples/wavelength_scan.py
 ```
 
 The script starts a sweep, polls wavelength and measured power while it
-runs, prints each sample, and (unless disabled) writes the results to a
+runs, logs each sample, and (unless disabled) writes the results to a
 CSV file.
+
+## Logging
+
+The driver logs through the standard `logging` module under the
+`agilent_8164b` logger and stays silent until your application configures
+logging. `INFO` reports connections and state changes (laser on/off, power,
+wavelength, sweep control); `DEBUG` additionally shows every SCPI command
+and response.
+
+```python
+import logging
+
+logging.basicConfig(level=logging.INFO)          # or logging.DEBUG for raw SCPI
+```
 
 ## Project layout
 

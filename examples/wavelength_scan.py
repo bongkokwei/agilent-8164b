@@ -10,9 +10,12 @@ your setup, then run:
 """
 
 import csv
+import logging
 import time
 
 from agilent_8164b import Agilent8164B
+
+logger = logging.getLogger(__name__)
 
 # ----------------------------- CONFIG -------------------------------------
 RESOURCE_NAME = "GPIB0::21::INSTR"  # VISA resource string for the mainframe
@@ -37,14 +40,17 @@ POLL_INTERVAL_S = 0.2               # How often to sample wavelength/power while
 SWEEP_TIMEOUT_S = 120.0             # Safety cutoff in case the sweep never reports "stopped"
 
 CSV_PATH = "wavelength_scan.csv"    # Set to None to skip writing a CSV
+
+LOG_LEVEL = logging.INFO            # Set to logging.DEBUG to see raw SCPI traffic
 # ---------------------------------------------------------------------------
 
 
 def main():
+    logger.info("Starting wavelength scan")
     results = []
 
     with Agilent8164B(RESOURCE_NAME, slot=SLOT, channel=CHANNEL) as laser:
-        print("Connected to:", laser.identify())
+        laser.identify()
 
         laser.set_power_unit(OUTPUT_POWER_UNIT)
         laser.set_power(OUTPUT_POWER, unit=OUTPUT_POWER_UNIT)
@@ -72,18 +78,18 @@ def main():
         try:
             while laser.is_sweeping():
                 if time.monotonic() - start_time > SWEEP_TIMEOUT_S:
-                    print("Sweep timeout exceeded, stopping.")
+                    logger.warning("Sweep timeout exceeded, stopping.")
                     break
 
                 wavelength_nm = laser.get_wavelength_nm()
                 power = laser.get_power()
-                print(f"wavelength={wavelength_nm:.3f} nm  "
-                      f"power={power:.3f} {OUTPUT_POWER_UNIT}")
+                logger.info("wavelength=%.3f nm  power=%.3f %s",
+                            wavelength_nm, power, OUTPUT_POWER_UNIT)
                 results.append((wavelength_nm, power))
 
                 time.sleep(POLL_INTERVAL_S)
 
-            print("Error queue:", laser.flush_errors())
+            logger.info("Error queue: %s", laser.flush_errors())
         finally:
             laser.stop_sweep()
             laser.laser_off()
@@ -93,8 +99,12 @@ def main():
             writer = csv.writer(f)
             writer.writerow(["wavelength_nm", f"power_{OUTPUT_POWER_UNIT}"])
             writer.writerows(results)
-        print(f"Wrote {len(results)} rows to {CSV_PATH}")
+        logger.info("Wrote %d rows to %s", len(results), CSV_PATH)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=LOG_LEVEL,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
     main()
