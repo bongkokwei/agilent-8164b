@@ -63,6 +63,53 @@ with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
 | `check_errors()` / `flush_errors()` | Read the SCPI error queue |
 | `close()` | Close the VISA session (also called automatically via `with`) |
 
+## GUI
+
+A PyQt6 control panel ships with the package:
+
+```bash
+pip install -e ".[gui]"
+agilent-8164b-gui                       # or: python -m agilent_8164b.gui.app
+```
+
+![The GUI during a wavelength sweep](docs/gui_screenshot.png)
+
+The window is split into a control column and a results pane:
+
+- **Connection** — pick a VISA resource (`Scan` lists what the backend can see),
+  set the slot, channel and timeout, then connect. The `*IDN?` response is shown
+  underneath, and everything else stays disabled until a session is open.
+- **Readout** — large wavelength and power values polled straight from the
+  instrument, plus the output path and sweep state. A red banner appears
+  whenever the output is emitting.
+- **Output** — laser on/off, wavelength, power (`dBm`/`mW`/`uW`/`nW`), the unit
+  the instrument reports in, and the output path for dual-output modules.
+- **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`
+  runs `:WAV:SWE:CHEC?` and reports the problem in place; `Start` re-checks
+  before it will start, so a bad range never reaches the hardware.
+- **Live trace** — measured power against wavelength, updated as the sweep
+  runs, exportable to CSV.
+- **Log** — the driver's own log messages, with a tick box to include the raw
+  SCPI traffic.
+
+All instrument I/O runs on a worker thread, so the window never freezes while
+the mainframe is answering. The output is switched off when you disconnect or
+close the window, `Ctrl+Shift+O` is a panic "output off now", and enabling the
+laser asks for confirmation (switch that off under *Instrument*).
+
+### Trying it without hardware
+
+`--simulate` swaps the driver for a simulated instrument that sweeps in real
+time and produces a synthetic spectrum, so you can explore the interface with
+no mainframe or VISA backend installed:
+
+```bash
+agilent-8164b-gui --simulate
+```
+
+Other options: `--resource`, `--slot`, `--channel`, `--poll-interval MS`
+(default 200), and `--debug` to log every SCPI exchange.
+
 ## Examples
 
 See [`examples/wavelength_scan.py`](examples/wavelength_scan.py) for a
@@ -97,11 +144,30 @@ logging.basicConfig(level=logging.INFO)          # or logging.DEBUG for raw SCPI
 ## Project layout
 
 ```
-src/agilent_8164b/   # installable package
+src/agilent_8164b/     # installable package
   __init__.py
-  instrument.py       # Agilent8164B driver class
+  instrument.py        # Agilent8164B driver class
+  gui/                 # PyQt6 control panel
+    app.py             # CLI entry point (agilent-8164b-gui)
+    main_window.py     # window, menus, worker thread wiring
+    widgets.py         # connection/readout/output/sweep panels
+    plot.py            # live trace and CSV export
+    worker.py          # instrument worker (all VISA I/O lives here)
+    simulator.py       # software stand-in used by --simulate and the tests
 examples/
-  wavelength_scan.py  # wavelength scan example with editable parameters
+  wavelength_scan.py   # wavelength scan example with editable parameters
+tests/
+  test_gui.py          # GUI tests, run against the simulator
+```
+
+## Tests
+
+The GUI tests drive the real window against the simulated instrument, so they
+need neither hardware nor a display:
+
+```bash
+pip install -e ".[dev]"
+QT_QPA_PLATFORM=offscreen pytest        # omit the prefix on a desktop
 ```
 
 ## License

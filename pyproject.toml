@@ -17,6 +17,22 @@ dependencies = [
 examples = [
     "matplotlib",
 ]
+gui = [
+    "PyQt6>=6.4",
+    "pyqtgraph>=0.13",
+]
+dev = [
+    "pytest",
+    "pytest-qt",
+    "PyQt6>=6.4",
+    "pyqtgraph>=0.13",
+]
+
+[project.scripts]
+agilent-8164b-gui = "agilent_8164b.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-v"
