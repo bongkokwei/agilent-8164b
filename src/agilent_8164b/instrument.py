@@ -242,6 +242,80 @@ class Agilent8164B:
         logger.debug("Output path: %s", path)
         return path
 
+    # -- trigger connectors -------------------------------------------
+    # Two settings are involved in making the rear-panel Input trigger
+    # connector do anything: the mainframe's trigger configuration decides
+    # whether the connector reaches the slots at all, and the per-slot input
+    # setting decides what that slot does when it is triggered.
+    _TRIGGER_CONFIG = {
+        "disabled": "DIS",
+        "default": "DEF",
+        "passthrough": "PASS",
+        "loopback": "LOOP",
+    }
+
+    #: Query responses map back onto the canonical keys above. The mainframe
+    #: answers with either the mnemonic or the numeric code, depending on
+    #: firmware revision, so both are accepted.
+    _TRIGGER_CONFIG_READ = {
+        "DIS": "disabled", "0": "disabled",
+        "DEF": "default", "1": "default",
+        "PASS": "passthrough", "2": "passthrough",
+        "LOOP": "loopback", "3": "loopback",
+    }
+
+    # Input trigger responses a tunable laser source understands. The
+    # measurement-oriented values (SMEasure/CMEasure) belong to power meter
+    # modules and are deliberately not offered here.
+    _INPUT_TRIGGER = {
+        "ignore": "IGN",
+        "sweep_start": "SWST",
+        "next_step": "NEXT",
+    }
+
+    _INPUT_TRIGGER_READ = {
+        "IGN": "ignore", "IGNORE": "ignore", "0": "ignore",
+        "SWST": "sweep_start", "SWSTART": "sweep_start", "SWS": "sweep_start",
+        "NEXT": "next_step", "NEXTSTEP": "next_step",
+    }
+
+    def set_trigger_configuration(self, config: str) -> None:
+        """Route the mainframe trigger connectors.
+
+        config: 'disabled' (connectors ignored), 'default' (input triggers
+        the slots, slots drive the output connector), 'passthrough' (as
+        default, plus an incoming trigger is passed straight to the output
+        connector) or 'loopback' (a slot's output trigger also triggers the
+        other slots).
+        """
+        code = self._TRIGGER_CONFIG[config.lower()]
+        logger.info("Setting trigger configuration to %s", code)
+        self._write(f":TRIG:CONF {code}")
+
+    def get_trigger_configuration(self) -> str:
+        response = self._query(":TRIG:CONF?").strip().upper().lstrip("+")
+        config = self._TRIGGER_CONFIG_READ.get(response, response.lower())
+        logger.debug("Trigger configuration: %s", config)
+        return config
+
+    def set_input_trigger_mode(self, mode: str) -> None:
+        """Set what the module does when the Input BNC triggers its slot.
+
+        mode: 'ignore', 'sweep_start' (start a sweep cycle) or 'next_step'
+        (advance a stepped sweep by one step).
+        """
+        code = self._INPUT_TRIGGER[mode.lower()]
+        logger.info("Setting input trigger mode to %s", code)
+        self._write(f":TRIG{self.slot}:CHAN{self.channel}:INP {code}")
+
+    def get_input_trigger_mode(self) -> str:
+        response = self._query(
+            f":TRIG{self.slot}:CHAN{self.channel}:INP?"
+        ).strip().upper().lstrip("+")
+        mode = self._INPUT_TRIGGER_READ.get(response, response.lower())
+        logger.debug("Input trigger mode: %s", mode)
+        return mode
+
     # -- power -------------------------------------------------------
     def set_power_unit(self, unit: str = "dBm") -> None:
         """unit: 'dBm' or 'W'."""

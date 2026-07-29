@@ -161,6 +161,29 @@ def test_output_path_selection(qapp, window, visa):
     assert ":OUTP0:CHAN1:PATH LOWS" in visa.writes
 
 
+def test_input_trigger_mode_selection(qapp, window, visa):
+    _connect(qapp, window)
+    window.trigger_panel.input_combo.setCurrentText("Next step")
+    _spin(qapp, 200)
+    assert ":TRIG0:CHAN1:INP NEXT" in visa.writes
+
+    window.trigger_panel.config_combo.setCurrentText("Default")
+    _spin(qapp, 200)
+    assert ":TRIG:CONF DEF" in visa.writes
+
+
+def test_trigger_panel_shows_the_instrument_state_on_connect(qapp, window, visa):
+    visa._input_trigger = "SWST"
+    visa._trigger_config = "PASS"
+    _connect(qapp, window)
+    _spin(qapp, 200)
+
+    assert window.trigger_panel.input_combo.currentText() == "Start sweep"
+    assert window.trigger_panel.config_combo.currentText() == "Pass through"
+    # Reflecting the readback must not command the instrument back.
+    assert not _commands(visa, ":TRIG0:CHAN1:INP S")
+
+
 def test_sweep_configures_starts_then_returns_to_idle(qapp, window, visa):
     _connect(qapp, window)
     window.sweep_panel.start_spin.setValue(1530.0)

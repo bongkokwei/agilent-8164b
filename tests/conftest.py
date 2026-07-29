@@ -39,6 +39,8 @@ class StubVisaResource:
         self._sweep_stop_m = 1580e-9
         self._sweeping = False
         self._sweep_polls_left = 0
+        self._input_trigger = "IGN"
+        self._trigger_config = "DIS"
 
     # -- PyVISA surface ------------------------------------------------
     def write(self, command: str) -> None:
@@ -90,6 +92,10 @@ class StubVisaResource:
             match = re.search(r"([-+]?\d*\.?\d+)\s*(DBM|MW|UW|NW)", command, re.I)
             if match:
                 self._power_dbm = float(match.group(1))  # dBm assumed in tests
+        elif ":CONF" in upper and upper.startswith(":TRIG"):
+            self._trigger_config = upper.rsplit(" ", 1)[-1]
+        elif ":INP" in upper and upper.startswith(":TRIG"):
+            self._input_trigger = upper.rsplit(" ", 1)[-1]
         elif upper.startswith("*RST"):
             self.__init__()
         elif upper.startswith("*CLS"):
@@ -115,6 +121,10 @@ class StubVisaResource:
             if self._sweep_stop_m <= self._sweep_start_m:
                 return "+257,End wavelength must be greater than start wavelength"
             return "+0,OK"
+        if upper.startswith(":TRIG") and ":CONF?" in upper:
+            return self._trigger_config
+        if upper.startswith(":TRIG") and ":INP?" in upper:
+            return self._input_trigger
         if ":WAV?" in upper:
             return f"{self._wavelength_m:.12E}"
         if ":POW:UNIT?" in upper:

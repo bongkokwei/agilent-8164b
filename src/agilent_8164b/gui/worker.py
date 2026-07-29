@@ -53,6 +53,7 @@ class LaserWorker(QObject):
     state_polled = pyqtSignal(dict)          # see _poll() for the keys
     sweep_running_changed = pyqtSignal(bool)
     sweep_checked = pyqtSignal(str)          # "OK" or a problem description
+    trigger_state_read = pyqtSignal(str, str)  # input mode, mainframe config
 
     def __init__(self, poll_interval_ms: int = 200):
         super().__init__()
@@ -110,6 +111,7 @@ class LaserWorker(QObject):
         self._poll_tick = 0
         self.connected.emit(idn)
         self.status.emit(f"Connected to {resource_name}")
+        self.read_trigger_state()
         if self._poll_timer is not None:
             self._poll_timer.start()
 
@@ -199,6 +201,43 @@ class LaserWorker(QObject):
             self.error.emit("Not connected — cannot set the output path.")
             return
         self._call("set the output path", self._inst.set_output_path, path)
+
+    # -- triggers ------------------------------------------------------
+    @pyqtSlot(str)
+    def set_input_trigger_mode(self, mode: str) -> None:
+        if self._inst is None:
+            self.error.emit("Not connected — cannot set the input trigger mode.")
+            return
+        if not self._failed(self._call("set the input trigger mode",
+                                       self._inst.set_input_trigger_mode, mode)):
+            self.status.emit(f"Input BNC: {mode.replace('_', ' ')}")
+
+    @pyqtSlot(str)
+    def set_trigger_configuration(self, config: str) -> None:
+        if self._inst is None:
+            self.error.emit("Not connected — cannot set the trigger configuration.")
+            return
+        if not self._failed(self._call("set the trigger configuration",
+                                       self._inst.set_trigger_configuration, config)):
+            self.status.emit(f"Trigger routing: {config}")
+
+    @pyqtSlot()
+    def read_trigger_state(self) -> None:
+        """Report what the instrument currently has configured.
+
+        Failures are logged rather than reported: modules that do not
+        implement the trigger subsystem should not greet the user with an
+        error dialog at connect time.
+        """
+        if self._inst is None:
+            return
+        try:
+            self.trigger_state_read.emit(
+                self._inst.get_input_trigger_mode(),
+                self._inst.get_trigger_configuration(),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read the trigger configuration: %s", exc)
 
     # -- sweep ---------------------------------------------------------
     @pyqtSlot(object)

@@ -323,6 +323,69 @@ class OutputPanel(QGroupBox):
         self._style_laser_button(on)
 
 
+class TriggerPanel(QGroupBox):
+    """What the module does when the rear-panel Input BNC is triggered."""
+
+    input_mode_requested = pyqtSignal(str)
+    configuration_requested = pyqtSignal(str)
+
+    _INPUT_MODES = {
+        "Ignore": "ignore",
+        "Start sweep": "sweep_start",
+        "Next step": "next_step",
+    }
+
+    _CONFIGURATIONS = {
+        "Disabled": "disabled",
+        "Default": "default",
+        "Pass through": "passthrough",
+        "Loopback": "loopback",
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("Trigger", parent)
+
+        self.input_combo = QComboBox()
+        self.input_combo.addItems(self._INPUT_MODES.keys())
+        self.input_combo.setToolTip(
+            "Response to an incoming trigger on the Input BNC:\n"
+            "Ignore — do nothing\n"
+            "Start sweep — begin a configured sweep cycle\n"
+            "Next step — advance a stepped sweep by one step"
+        )
+
+        self.config_combo = QComboBox()
+        self.config_combo.addItems(self._CONFIGURATIONS.keys())
+        self.config_combo.setToolTip(
+            "Mainframe trigger routing. The Input BNC only reaches the "
+            "module when this is anything other than Disabled."
+        )
+
+        form = QFormLayout(self)
+        form.addRow("Input BNC", self.input_combo)
+        form.addRow("Routing", self.config_combo)
+
+        self.input_combo.currentTextChanged.connect(
+            lambda text: self.input_mode_requested.emit(self._INPUT_MODES[text])
+        )
+        self.config_combo.currentTextChanged.connect(
+            lambda text: self.configuration_requested.emit(self._CONFIGURATIONS[text])
+        )
+
+    def set_state_silently(self, input_mode: str, configuration: str) -> None:
+        """Show what the instrument reports without commanding it back."""
+        for combo, mapping, value in (
+            (self.input_combo, self._INPUT_MODES, input_mode),
+            (self.config_combo, self._CONFIGURATIONS, configuration),
+        ):
+            label = next((k for k, v in mapping.items() if v == value), None)
+            if label is None:
+                continue
+            combo.blockSignals(True)
+            combo.setCurrentText(label)
+            combo.blockSignals(False)
+
+
 class SweepPanel(QGroupBox):
     """Configuration and transport controls for the built-in sweep engine."""
 

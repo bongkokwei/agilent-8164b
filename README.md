@@ -60,6 +60,8 @@ with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
 | `start_sweep()` / `stop_sweep()` / `pause_sweep()` / `continue_sweep()` | Control a configured sweep |
 | `is_sweeping()` | True while the sweep is running |
 | `check_sweep_params()` | Validate the configured sweep, returns `"OK"` or a description of the problem |
+| `set_input_trigger_mode(mode)` / `get_input_trigger_mode()` | What the module does when the Input BNC fires (`ignore`, `sweep_start`, `next_step`) |
+| `set_trigger_configuration(config)` / `get_trigger_configuration()` | Mainframe trigger routing (`disabled`, `default`, `passthrough`, `loopback`) |
 | `check_errors()` / `flush_errors()` | Read the SCPI error queue |
 | `close()` | Close the VISA session (also called automatically via `with`) |
 
@@ -93,6 +95,11 @@ laser source module. It measures nothing, because the module has no detector.
 - **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`
   runs `:WAV:SWE:CHEC?` and reports the problem in place; `Start` re-checks
   before it will start, so a bad range never reaches the hardware.
+- **Trigger** — what an incoming trigger on the rear-panel Input BNC does to
+  the module (ignore it, start a sweep, or advance a stepped sweep by one
+  step), plus the mainframe's trigger routing. Both are read back when you
+  connect. The input connector is ignored entirely while routing is
+  `Disabled`, which is the instrument's default.
 - **Log** — the driver's own log messages, with a tick box to include the raw
   SCPI traffic.
 
@@ -149,7 +156,7 @@ src/agilent_8164b/     # installable package
   gui/                 # PyQt6 control panel
     app.py             # CLI entry point (agilent-8164b-gui)
     main_window.py     # window, menus, worker thread wiring
-    widgets.py         # connection/readout/output/sweep panels
+    widgets.py         # connection/readout/output/sweep/trigger panels
     worker.py          # instrument worker (all VISA I/O lives here)
 examples/
   wavelength_scan.py   # wavelength scan example with editable parameters

@@ -17,7 +17,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .widgets import ConnectionPanel, LogPanel, OutputPanel, ReadoutPanel, SweepPanel
+from .widgets import (
+    ConnectionPanel,
+    LogPanel,
+    OutputPanel,
+    ReadoutPanel,
+    SweepPanel,
+    TriggerPanel,
+)
 from .worker import LaserWorker
 
 logger = logging.getLogger(__name__)
@@ -83,6 +90,7 @@ class LaserMainWindow(QMainWindow):
         self.readout_panel = ReadoutPanel()
         self.output_panel = OutputPanel()
         self.sweep_panel = SweepPanel()
+        self.trigger_panel = TriggerPanel()
         self.log_panel = LogPanel()
 
         left_column = QWidget()
@@ -92,6 +100,7 @@ class LaserMainWindow(QMainWindow):
         left_layout.addWidget(self.readout_panel)
         left_layout.addWidget(self.output_panel)
         left_layout.addWidget(self.sweep_panel)
+        left_layout.addWidget(self.trigger_panel)
         left_layout.addStretch(1)
 
         log_box = QGroupBox("Log")
@@ -169,6 +178,13 @@ class LaserMainWindow(QMainWindow):
         self.sweep_panel.continue_requested.connect(self.worker.continue_sweep)
         self.sweep_panel.check_requested.connect(self._on_sweep_check)
 
+        self.trigger_panel.input_mode_requested.connect(
+            self.worker.set_input_trigger_mode
+        )
+        self.trigger_panel.configuration_requested.connect(
+            self.worker.set_trigger_configuration
+        )
+
         # worker -> GUI
         self.worker.resources_listed.connect(self.connection_panel.set_resources)
         self.worker.connected.connect(self._on_connected)
@@ -178,6 +194,7 @@ class LaserMainWindow(QMainWindow):
         self.worker.state_polled.connect(self._on_state)
         self.worker.sweep_running_changed.connect(self.sweep_panel.set_sweep_running)
         self.worker.sweep_checked.connect(self.sweep_panel.show_check_result)
+        self.worker.trigger_state_read.connect(self.trigger_panel.set_state_silently)
 
         self.laser_on_requested.connect(self.worker.set_laser_on)
         self.sweep_start_requested.connect(self.worker.start_sweep)
@@ -299,6 +316,7 @@ class LaserMainWindow(QMainWindow):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.output_panel.setEnabled(enabled)
         self.sweep_panel.setEnabled(enabled)
+        self.trigger_panel.setEnabled(enabled)
         for action in (self.laser_off_action, self.reset_action, self.errors_action):
             action.setEnabled(enabled)
 
