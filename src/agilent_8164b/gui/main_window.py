@@ -102,6 +102,11 @@ class LaserMainWindow(QMainWindow):
         # Modulation sits beside the output settings it modulates, triggers
         # beside the sweep they gate.
         left_column = QWidget()
+        # The controls are all short fields and dropdowns, so past a certain
+        # width they just grow whitespace. Cap the column and give the rest of
+        # the window to the log, which does use the room.
+        left_column.setMinimumWidth(500)
+        left_column.setMaximumWidth(600)
         left_layout = QGridLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setHorizontalSpacing(8)
@@ -127,7 +132,7 @@ class LaserMainWindow(QMainWindow):
         splitter.addWidget(log_box)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([700, 520])
+        splitter.setSizes([600, 620])
         self.setCentralWidget(splitter)
 
         self.status_label = QLabel("Not connected")
