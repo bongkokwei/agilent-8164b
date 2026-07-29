@@ -35,6 +35,44 @@ WAVELENGTH_MIN_NM = 1200.0
 WAVELENGTH_MAX_NM = 1700.0
 
 
+#: Entry fields are capped so a panel never widens to fit a spin box that
+#: only ever shows a handful of digits.
+FIELD_MAX_WIDTH = 140
+
+#: Dropdowns get a little more room: their entries are words, not digits.
+COMBO_MAX_WIDTH = 165
+
+
+def compact(widget: QWidget) -> QWidget:
+    """Stop a field claiming more width than its content needs."""
+    if isinstance(widget, QComboBox):
+        widget.setMaximumWidth(COMBO_MAX_WIDTH)
+        # A long entry elides in the closed combo rather than forcing the
+        # whole column wider. The popup still shows the full text.
+        widget.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        widget.setMinimumContentsLength(10)
+    else:
+        widget.setMaximumWidth(FIELD_MAX_WIDTH)
+    return widget
+
+
+def form_layout(parent: QWidget | None = None) -> QFormLayout:
+    """A form layout styled the same way in every panel.
+
+    The panels sit side by side, so their label columns are compared against
+    each other: right-aligned captions and a common growth policy keep the
+    controls on a shared line rather than drifting per panel.
+    """
+    form = QFormLayout(parent) if parent is not None else QFormLayout()
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    form.setHorizontalSpacing(8)
+    form.setVerticalSpacing(6)
+    return form
+
+
 class ConnectionPanel(QGroupBox):
     """VISA resource selection and session control."""
 
@@ -56,13 +94,18 @@ class ConnectionPanel(QGroupBox):
         self.refresh_button = QPushButton("Scan")
         self.refresh_button.setToolTip("List the VISA resources currently visible")
 
+        # Three narrow numbers share one row: given a form row each they
+        # stretch to the width of the resource string, which reads as an
+        # accident rather than a choice.
         self.slot_spin = QSpinBox()
         self.slot_spin.setRange(0, 4)
+        self.slot_spin.setFixedWidth(60)
         self.slot_spin.setToolTip("Mainframe slot holding the laser module")
 
         self.channel_spin = QSpinBox()
         self.channel_spin.setRange(1, 2)
         self.channel_spin.setValue(1)
+        self.channel_spin.setFixedWidth(60)
         self.channel_spin.setToolTip("Channel number (dual-wavelength sources)")
 
         self.timeout_spin = QSpinBox()
@@ -70,6 +113,8 @@ class ConnectionPanel(QGroupBox):
         self.timeout_spin.setSingleStep(500)
         self.timeout_spin.setValue(5000)
         self.timeout_spin.setSuffix(" ms")
+        self.timeout_spin.setFixedWidth(110)
+        self.timeout_spin.setToolTip("VISA timeout")
 
         self.connect_button = QPushButton("Connect")
         self.connect_button.setDefault(True)
@@ -84,15 +129,23 @@ class ConnectionPanel(QGroupBox):
         resource_row.addWidget(self.resource_combo, 1)
         resource_row.addWidget(self.refresh_button)
 
+        module_row = QHBoxLayout()
+        module_row.setSpacing(6)
+        for caption, widget in (("Slot", self.slot_spin),
+                                ("Channel", self.channel_spin),
+                                ("Timeout", self.timeout_spin)):
+            module_row.addWidget(QLabel(caption))
+            module_row.addWidget(widget)
+            module_row.addSpacing(10)
+        module_row.addStretch(1)
+
         button_row = QHBoxLayout()
         button_row.addWidget(self.connect_button)
         button_row.addWidget(self.disconnect_button)
 
-        form = QFormLayout(self)
+        form = form_layout(self)
         form.addRow("Resource", resource_row)
-        form.addRow("Slot", self.slot_spin)
-        form.addRow("Channel", self.channel_spin)
-        form.addRow("Timeout", self.timeout_spin)
+        form.addRow("Module", module_row)
         form.addRow(button_row)
         form.addRow(self.idn_label)
 
@@ -160,11 +213,6 @@ class ReadoutPanel(QGroupBox):
         for label in (self.path_label, self.sweep_label):
             label.setStyleSheet("color: palette(mid);")
 
-        grid = QGridLayout(self)
-        grid.addWidget(self.state_label, 0, 0, 1, 3)
-        grid.addWidget(QLabel("Wavelength"), 1, 0)
-        grid.addWidget(self.wavelength_value, 1, 1)
-        grid.addWidget(QLabel("nm"), 1, 2)
         # ":SOUR:POW?" reads back the commanded power, not a measurement —
         # the source module has no detector — so the label says so.
         power_caption = QLabel("Power (set)")
@@ -172,13 +220,25 @@ class ReadoutPanel(QGroupBox):
             "Read back from the source, i.e. the power the module has been "
             "told to emit. It is not a measurement."
         )
-        grid.addWidget(power_caption, 2, 0)
-        grid.addWidget(self.power_value, 2, 1)
         self.power_unit_label = QLabel("dBm")
-        grid.addWidget(self.power_unit_label, 2, 2)
-        grid.addWidget(self.path_label, 3, 0, 1, 3)
-        grid.addWidget(self.sweep_label, 4, 0, 1, 3)
+
+        # The two readings sit side by side rather than stacked: the panel is
+        # as wide as the whole control column, and one number per row leaves a
+        # caption stranded at one edge and its value at the other.
+        grid = QGridLayout(self)
+        grid.setHorizontalSpacing(8)
+        grid.addWidget(self.state_label, 0, 0, 1, 7)
+        grid.addWidget(QLabel("Wavelength"), 1, 0)
+        grid.addWidget(self.wavelength_value, 1, 1)
+        grid.addWidget(QLabel("nm"), 1, 2)
+        grid.addWidget(power_caption, 1, 4)
+        grid.addWidget(self.power_value, 1, 5)
+        grid.addWidget(self.power_unit_label, 1, 6)
+        grid.addWidget(self.path_label, 2, 0, 1, 3)
+        grid.addWidget(self.sweep_label, 2, 4, 1, 3)
         grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(5, 1)
+        grid.setColumnMinimumWidth(3, 24)  # gutter between the two readings
 
         self.set_output_state(False)
 
@@ -246,6 +306,7 @@ class OutputPanel(QGroupBox):
         self.wavelength_spin.setValue(1550.0)
         self.wavelength_spin.setSuffix(" nm")
         self.wavelength_spin.setKeyboardTracking(False)
+        compact(self.wavelength_spin)
         self.wavelength_button = QPushButton("Set")
 
         self.power_spin = QDoubleSpinBox()
@@ -254,17 +315,21 @@ class OutputPanel(QGroupBox):
         self.power_spin.setSingleStep(0.1)
         self.power_spin.setValue(0.0)
         self.power_spin.setKeyboardTracking(False)
+        compact(self.power_spin)
         self.power_unit_combo = QComboBox()
         self.power_unit_combo.addItems(["dBm", "mW", "uW", "nW"])
+        self.power_unit_combo.setFixedWidth(70)
         self.power_button = QPushButton("Set")
 
         self.display_unit_combo = QComboBox()
         self.display_unit_combo.addItems(["dBm", "W"])
         self.display_unit_combo.setToolTip("Unit the instrument reports power in")
+        compact(self.display_unit_combo)
 
         self.path_combo = QComboBox()
         self.path_combo.addItems(self._PATHS.keys())
         self.path_combo.setToolTip("Output port — dual-output modules only")
+        compact(self.path_combo)
 
         wavelength_row = QHBoxLayout()
         wavelength_row.addWidget(self.wavelength_spin, 1)
@@ -277,7 +342,7 @@ class OutputPanel(QGroupBox):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.laser_button)
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("Wavelength", wavelength_row)
         form.addRow("Power", power_row)
         form.addRow("Display unit", self.display_unit_combo)
@@ -293,9 +358,14 @@ class OutputPanel(QGroupBox):
         )
         self.power_button.clicked.connect(self._emit_power)
         self.display_unit_combo.currentTextChanged.connect(self.power_unit_requested)
-        self.path_combo.currentTextChanged.connect(
-            lambda text: self.output_path_requested.emit(self._PATHS[text])
-        )
+        self.path_combo.currentTextChanged.connect(self._on_path_changed)
+        self._on_path_changed(self.path_combo.currentText())
+
+    def _on_path_changed(self, text: str) -> None:
+        # The longest entries do not fit the closed combo, so the tooltip
+        # carries the selection in full.
+        self.path_combo.setToolTip(f"{text} — dual-output modules only")
+        self.output_path_requested.emit(self._PATHS[text])
 
     def _emit_power(self) -> None:
         self.power_requested.emit(
@@ -323,6 +393,142 @@ class OutputPanel(QGroupBox):
         self._style_laser_button(on)
 
 
+class ModulationPanel(QGroupBox):
+    """Modulation source for the laser output.
+
+    The entries mirror the module's own External Modulation menu, with an Off
+    entry for disabling modulation altogether. Internal digital modulation and
+    low-frequency coherence control are driver-level only: they are not on the
+    module's menu, so they are not offered here.
+    """
+
+    #: 'off' is not a source — it disables modulation with :AM:STATe.
+    mode_requested = pyqtSignal(str)
+
+    _MODES = {
+        "Off": "off",
+        "External digital": "digital",
+        "External analog": "analog",
+        "Wavelength locking": "wavelength_locking",
+        "Backplane": "backplane",
+        "Coherence control": "coherence",
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("Modulation", parent)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(self._MODES.keys())
+        self.mode_combo.setToolTip(
+            "External digital/analog are driven through the BNC input on the "
+            "laser module.\nBackplane takes the same digital signal from the "
+            "mainframe Input Trigger connector instead, so it needs the "
+            "trigger routing below to be enabled."
+        )
+        compact(self.mode_combo)
+
+        self.note_label = QLabel("")
+        self.note_label.setWordWrap(True)
+        self.note_label.setStyleSheet("color: palette(mid);")
+
+        form = form_layout(self)
+        form.addRow("Mode", self.mode_combo)
+        form.addRow(self.note_label)
+
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+
+    def _on_mode_changed(self, text: str) -> None:
+        mode = self._MODES[text]
+        self._show_note(mode)
+        self.mode_requested.emit(mode)
+
+    def _show_note(self, mode: str) -> None:
+        # A sweep with lambda logging refuses to start unless modulation is
+        # off or set to coherence control, so say so before the sweep fails.
+        if mode in ("off", "coherence"):
+            self.note_label.setText("")
+        else:
+            self.note_label.setText(
+                "Blocks a continuous sweep with lambda logging — the "
+                "instrument allows only coherence control or off."
+            )
+
+    def set_mode_silently(self, mode: str) -> None:
+        """Show what the instrument reports without commanding it back."""
+        label = next((k for k, v in self._MODES.items() if v == mode), None)
+        if label is None:
+            return
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText(label)
+        self.mode_combo.blockSignals(False)
+        self._show_note(mode)
+
+
+class TriggerPanel(QGroupBox):
+    """What the module does when the mainframe's Input BNC is triggered."""
+
+    input_mode_requested = pyqtSignal(str)
+    configuration_requested = pyqtSignal(str)
+
+    _INPUT_MODES = {
+        "Ignore": "ignore",
+        "Start sweep": "sweep_start",
+        "Next step": "next_step",
+    }
+
+    _CONFIGURATIONS = {
+        "Disabled": "disabled",
+        "Default": "default",
+        "Pass through": "passthrough",
+        "Loopback": "loopback",
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("Trigger", parent)
+
+        self.input_combo = QComboBox()
+        self.input_combo.addItems(self._INPUT_MODES.keys())
+        self.input_combo.setToolTip(
+            "Response to an incoming trigger on the Input BNC:\n"
+            "Ignore — do nothing\n"
+            "Start sweep — begin a configured sweep cycle\n"
+            "Next step — advance a stepped sweep by one step"
+        )
+        compact(self.input_combo)
+
+        self.config_combo = QComboBox()
+        self.config_combo.addItems(self._CONFIGURATIONS.keys())
+        self.config_combo.setToolTip(
+            "Mainframe trigger routing. The Input BNC only reaches the "
+            "module when this is anything other than Disabled."
+        )
+        compact(self.config_combo)
+
+        form = form_layout(self)
+        form.addRow("Input BNC", self.input_combo)
+        form.addRow("Routing", self.config_combo)
+
+        self.input_combo.currentTextChanged.connect(
+            lambda text: self.input_mode_requested.emit(self._INPUT_MODES[text])
+        )
+        self.config_combo.currentTextChanged.connect(
+            lambda text: self.configuration_requested.emit(self._CONFIGURATIONS[text])
+        )
+
+    def set_state_silently(self, input_mode: str, configuration: str) -> None:
+        """Show what the instrument reports without commanding it back."""
+        for combo, mapping, value in (
+            (self.input_combo, self._INPUT_MODES, input_mode),
+            (self.config_combo, self._CONFIGURATIONS, configuration),
+        ):
+            label = next((k for k, v in mapping.items() if v == value), None)
+            if label is None:
+                continue
+            combo.blockSignals(True)
+            combo.setCurrentText(label)
+            combo.blockSignals(False)
+
+
 class SweepPanel(QGroupBox):
     """Configuration and transport controls for the built-in sweep engine."""
 
@@ -340,30 +546,36 @@ class SweepPanel(QGroupBox):
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Stepped", "Continuous"])
+        compact(self.mode_combo)
 
         self.step_spin = QDoubleSpinBox()
         self.step_spin.setRange(0.0001, 100.0)
         self.step_spin.setDecimals(4)
         self.step_spin.setValue(1.0)
         self.step_spin.setSuffix(" nm")
+        compact(self.step_spin)
 
         self.dwell_spin = QDoubleSpinBox()
         self.dwell_spin.setRange(0.0, 100.0)
         self.dwell_spin.setDecimals(3)
         self.dwell_spin.setValue(0.1)
         self.dwell_spin.setSuffix(" s")
+        compact(self.dwell_spin)
 
         self.speed_spin = QDoubleSpinBox()
         self.speed_spin.setRange(0.001, 200.0)
         self.speed_spin.setDecimals(3)
         self.speed_spin.setValue(10.0)
         self.speed_spin.setSuffix(" nm/s")
+        compact(self.speed_spin)
 
         self.cycles_spin = QSpinBox()
         self.cycles_spin.setRange(1, 1000)
+        compact(self.cycles_spin)
 
         self.repeat_combo = QComboBox()
         self.repeat_combo.addItems(["One way", "Two way"])
+        compact(self.repeat_combo)
 
         self.check_button = QPushButton("Check")
         self.check_button.setToolTip("Validate the parameters without starting")
@@ -375,7 +587,7 @@ class SweepPanel(QGroupBox):
         self.check_label = QLabel("")
         self.check_label.setWordWrap(True)
 
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("Start", self.start_spin)
         form.addRow("Stop", self.stop_spin)
         form.addRow("Mode", self.mode_combo)
@@ -385,14 +597,24 @@ class SweepPanel(QGroupBox):
         form.addRow("Cycles", self.cycles_spin)
         form.addRow("Direction", self.repeat_combo)
 
-        button_row = QHBoxLayout()
-        for button in (self.check_button, self.start_button, self.pause_button,
-                       self.continue_button, self.stop_button):
-            button_row.addWidget(button)
+        # Two rows rather than five buttons across: on a narrow column the
+        # single row squeezes "Continue" down to an ellipsis. This also puts
+        # the two buttons that act on a stopped sweep together, and the three
+        # that act on a running one below them.
+        buttons = QGridLayout()
+        buttons.setSpacing(6)
+        buttons.addWidget(self.check_button, 0, 0)
+        buttons.addWidget(self.start_button, 0, 1, 1, 2)
+        buttons.addWidget(self.pause_button, 1, 0)
+        buttons.addWidget(self.continue_button, 1, 1)
+        buttons.addWidget(self.stop_button, 1, 2)
+        buttons.setColumnStretch(0, 1)
+        buttons.setColumnStretch(1, 1)
+        buttons.setColumnStretch(2, 1)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addLayout(button_row)
+        layout.addLayout(buttons)
         layout.addWidget(self.check_label)
 
         self.mode_combo.currentTextChanged.connect(self._update_mode_fields)
@@ -418,6 +640,7 @@ class SweepPanel(QGroupBox):
         spin.setValue(value)
         spin.setSuffix(" nm")
         spin.setKeyboardTracking(False)
+        compact(spin)
         return spin
 
     def _update_mode_fields(self, mode_text: str) -> None:

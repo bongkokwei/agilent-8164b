@@ -8,6 +8,7 @@ from collections import deque
 from PyQt6.QtCore import QMetaObject, QSettings, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QGridLayout,
     QGroupBox,
     QLabel,
     QMainWindow,
@@ -17,7 +18,15 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .widgets import ConnectionPanel, LogPanel, OutputPanel, ReadoutPanel, SweepPanel
+from .widgets import (
+    ConnectionPanel,
+    LogPanel,
+    ModulationPanel,
+    OutputPanel,
+    ReadoutPanel,
+    SweepPanel,
+    TriggerPanel,
+)
 from .worker import LaserWorker
 
 logger = logging.getLogger(__name__)
@@ -65,7 +74,7 @@ class LaserMainWindow(QMainWindow):
         self._confirm_output = True
 
         self.setWindowTitle("Agilent 8164B laser control")
-        self.resize(980, 720)
+        self.resize(1220, 760)
 
         self._build_ui()
         self._build_menus()
@@ -83,16 +92,36 @@ class LaserMainWindow(QMainWindow):
         self.readout_panel = ReadoutPanel()
         self.output_panel = OutputPanel()
         self.sweep_panel = SweepPanel()
+        self.modulation_panel = ModulationPanel()
+        self.trigger_panel = TriggerPanel()
         self.log_panel = LogPanel()
 
+        # One grid for the whole control column, so the two columns share a
+        # single boundary: laying each row out on its own lets every row
+        # negotiate its own split, and the group boxes end up misaligned.
+        # Modulation sits beside the output settings it modulates, triggers
+        # beside the sweep they gate.
         left_column = QWidget()
-        left_layout = QVBoxLayout(left_column)
+        # The controls are all short fields and dropdowns, so past a certain
+        # width they just grow whitespace. Cap the column and give the rest of
+        # the window to the log, which does use the room.
+        left_column.setMinimumWidth(500)
+        left_column.setMaximumWidth(580)
+        left_layout = QGridLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(self.connection_panel)
-        left_layout.addWidget(self.readout_panel)
-        left_layout.addWidget(self.output_panel)
-        left_layout.addWidget(self.sweep_panel)
-        left_layout.addStretch(1)
+        left_layout.setHorizontalSpacing(8)
+        left_layout.setVerticalSpacing(8)
+
+        top = Qt.AlignmentFlag.AlignTop
+        left_layout.addWidget(self.connection_panel, 0, 0, 1, 2)
+        left_layout.addWidget(self.readout_panel, 1, 0, 1, 2)
+        left_layout.addWidget(self.output_panel, 2, 0, top)
+        left_layout.addWidget(self.modulation_panel, 2, 1, top)
+        left_layout.addWidget(self.sweep_panel, 3, 0, top)
+        left_layout.addWidget(self.trigger_panel, 3, 1, top)
+        left_layout.setColumnStretch(0, 3)
+        left_layout.setColumnStretch(1, 2)
+        left_layout.setRowStretch(4, 1)
 
         log_box = QGroupBox("Log")
         log_layout = QVBoxLayout(log_box)
@@ -103,7 +132,7 @@ class LaserMainWindow(QMainWindow):
         splitter.addWidget(log_box)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([420, 760])
+        splitter.setSizes([580, 640])
         self.setCentralWidget(splitter)
 
         self.status_label = QLabel("Not connected")
@@ -169,6 +198,15 @@ class LaserMainWindow(QMainWindow):
         self.sweep_panel.continue_requested.connect(self.worker.continue_sweep)
         self.sweep_panel.check_requested.connect(self._on_sweep_check)
 
+        self.modulation_panel.mode_requested.connect(self.worker.set_modulation_mode)
+
+        self.trigger_panel.input_mode_requested.connect(
+            self.worker.set_input_trigger_mode
+        )
+        self.trigger_panel.configuration_requested.connect(
+            self.worker.set_trigger_configuration
+        )
+
         # worker -> GUI
         self.worker.resources_listed.connect(self.connection_panel.set_resources)
         self.worker.connected.connect(self._on_connected)
@@ -178,6 +216,8 @@ class LaserMainWindow(QMainWindow):
         self.worker.state_polled.connect(self._on_state)
         self.worker.sweep_running_changed.connect(self.sweep_panel.set_sweep_running)
         self.worker.sweep_checked.connect(self.sweep_panel.show_check_result)
+        self.worker.trigger_state_read.connect(self.trigger_panel.set_state_silently)
+        self.worker.modulation_mode_read.connect(self.modulation_panel.set_mode_silently)
 
         self.laser_on_requested.connect(self.worker.set_laser_on)
         self.sweep_start_requested.connect(self.worker.start_sweep)
@@ -299,6 +339,8 @@ class LaserMainWindow(QMainWindow):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.output_panel.setEnabled(enabled)
         self.sweep_panel.setEnabled(enabled)
+        self.modulation_panel.setEnabled(enabled)
+        self.trigger_panel.setEnabled(enabled)
         for action in (self.laser_off_action, self.reset_action, self.errors_action):
             action.setEnabled(enabled)
 

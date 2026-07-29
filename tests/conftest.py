@@ -19,6 +19,13 @@ class StubVisaResource:
     typo in the driver shows up as an unanswered query rather than passing.
     """
 
+    #: Mnemonics the mainframe accepts for ``:AM:SOUR``, and the codes it
+    #: reports back for them.
+    AM_SOURCE_CODES = {
+        "INT": 0, "INT1": 0, "COHC": 1, "INT2": 1, "AEXT": 2, "EXT": 2,
+        "DEXT": 3, "WVLL": 5, "BACK": 6,
+    }
+
     #: Number of ``:WAV:SWE:STAT?`` polls a started sweep stays "running" for.
     #: A fixed count keeps sweep tests deterministic — no wall-clock waiting.
     SWEEP_POLLS = 3
@@ -39,6 +46,10 @@ class StubVisaResource:
         self._sweep_stop_m = 1580e-9
         self._sweeping = False
         self._sweep_polls_left = 0
+        self._input_trigger = "IGN"
+        self._trigger_config = "DIS"
+        self._am_source = 0        # numeric code, as :AM:SOUR? reports it
+        self._am_on = False
 
     # -- PyVISA surface ------------------------------------------------
     def write(self, command: str) -> None:
@@ -90,6 +101,15 @@ class StubVisaResource:
             match = re.search(r"([-+]?\d*\.?\d+)\s*(DBM|MW|UW|NW)", command, re.I)
             if match:
                 self._power_dbm = float(match.group(1))  # dBm assumed in tests
+        elif ":AM:SOUR" in upper:
+            code = upper.rsplit(" ", 1)[-1]
+            self._am_source = self.AM_SOURCE_CODES.get(code, code)
+        elif ":AM:STAT" in upper:
+            self._am_on = upper.rstrip().endswith("1")
+        elif ":CONF" in upper and upper.startswith(":TRIG"):
+            self._trigger_config = upper.rsplit(" ", 1)[-1]
+        elif ":INP" in upper and upper.startswith(":TRIG"):
+            self._input_trigger = upper.rsplit(" ", 1)[-1]
         elif upper.startswith("*RST"):
             self.__init__()
         elif upper.startswith("*CLS"):
@@ -115,6 +135,14 @@ class StubVisaResource:
             if self._sweep_stop_m <= self._sweep_start_m:
                 return "+257,End wavelength must be greater than start wavelength"
             return "+0,OK"
+        if ":AM:SOUR?" in upper:
+            return f"+{self._am_source}"
+        if ":AM:STAT?" in upper:
+            return "+1" if self._am_on else "+0"
+        if upper.startswith(":TRIG") and ":CONF?" in upper:
+            return self._trigger_config
+        if upper.startswith(":TRIG") and ":INP?" in upper:
+            return self._input_trigger
         if ":WAV?" in upper:
             return f"{self._wavelength_m:.12E}"
         if ":POW:UNIT?" in upper:

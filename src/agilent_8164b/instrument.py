@@ -242,6 +242,142 @@ class Agilent8164B:
         logger.debug("Output path: %s", path)
         return path
 
+    # -- trigger connectors -------------------------------------------
+    # Two settings are involved in making the mainframe's Input trigger
+    # connector do anything: the trigger configuration decides
+    # whether the connector reaches the slots at all, and the per-slot input
+    # setting decides what that slot does when it is triggered.
+    _TRIGGER_CONFIG = {
+        "disabled": "DIS",
+        "default": "DEF",
+        "passthrough": "PASS",
+        "loopback": "LOOP",
+    }
+
+    #: Query responses map back onto the canonical keys above. The mainframe
+    #: answers with either the mnemonic or the numeric code, depending on
+    #: firmware revision, so both are accepted.
+    _TRIGGER_CONFIG_READ = {
+        "DIS": "disabled", "0": "disabled",
+        "DEF": "default", "1": "default",
+        "PASS": "passthrough", "2": "passthrough",
+        "LOOP": "loopback", "3": "loopback",
+    }
+
+    # Input trigger responses a tunable laser source understands. The
+    # measurement-oriented values (SMEasure/CMEasure) belong to power meter
+    # modules and are deliberately not offered here.
+    _INPUT_TRIGGER = {
+        "ignore": "IGN",
+        "sweep_start": "SWST",
+        "next_step": "NEXT",
+    }
+
+    _INPUT_TRIGGER_READ = {
+        "IGN": "ignore", "IGNORE": "ignore", "0": "ignore",
+        "SWST": "sweep_start", "SWSTART": "sweep_start", "SWS": "sweep_start",
+        "NEXT": "next_step", "NEXTSTEP": "next_step",
+    }
+
+    def set_trigger_configuration(self, config: str) -> None:
+        """Route the mainframe trigger connectors.
+
+        config: 'disabled' (connectors ignored), 'default' (input triggers
+        the slots, slots drive the output connector), 'passthrough' (as
+        default, plus an incoming trigger is passed straight to the output
+        connector) or 'loopback' (a slot's output trigger also triggers the
+        other slots).
+        """
+        code = self._TRIGGER_CONFIG[config.lower()]
+        logger.info("Setting trigger configuration to %s", code)
+        self._write(f":TRIG:CONF {code}")
+
+    def get_trigger_configuration(self) -> str:
+        response = self._query(":TRIG:CONF?").strip().upper().lstrip("+")
+        config = self._TRIGGER_CONFIG_READ.get(response, response.lower())
+        logger.debug("Trigger configuration: %s", config)
+        return config
+
+    def set_input_trigger_mode(self, mode: str) -> None:
+        """Set what the module does when the Input BNC triggers its slot.
+
+        mode: 'ignore', 'sweep_start' (start a sweep cycle) or 'next_step'
+        (advance a stepped sweep by one step).
+        """
+        code = self._INPUT_TRIGGER[mode.lower()]
+        logger.info("Setting input trigger mode to %s", code)
+        self._write(f":TRIG{self.slot}:CHAN{self.channel}:INP {code}")
+
+    def get_input_trigger_mode(self) -> str:
+        response = self._query(
+            f":TRIG{self.slot}:CHAN{self.channel}:INP?"
+        ).strip().upper().lstrip("+")
+        mode = self._INPUT_TRIGGER_READ.get(response, response.lower())
+        logger.debug("Input trigger mode: %s", mode)
+        return mode
+
+    # -- modulation ----------------------------------------------------
+    # The two external modes are driven through the BNC input on the laser
+    # module itself. 'backplane' is the exception: it takes the same digital
+    # signal from the mainframe's Input Trigger connector (or from another
+    # module's output trigger, with the routing set to loopback), so it needs
+    # the trigger configuration above to be enabled.
+    _MODULATION_SOURCE = {
+        "internal": "INT1",
+        "coherence": "COHC",
+        "analog": "AEXT",
+        "digital": "DEXT",
+        # The manual documents 'LFCohctrl' as value 4 but leaves both the
+        # mnemonic and the number out of the command's own syntax line, so
+        # send the bare code and let the instrument reject it if unsupported.
+        "lf_coherence": "4",
+        "wavelength_locking": "WVLL",
+        "backplane": "BACK",
+    }
+
+    #: :AM:SOUR? answers with the numeric code; mnemonics are accepted too in
+    #: case a module's firmware echoes what it was sent.
+    _MODULATION_SOURCE_READ = {
+        "0": "internal", "INT": "internal", "INT1": "internal",
+        "1": "coherence", "COHC": "coherence", "INT2": "coherence",
+        "2": "analog", "AEXT": "analog", "EXT": "analog",
+        "3": "digital", "DEXT": "digital",
+        "4": "lf_coherence", "LFC": "lf_coherence",
+        "5": "wavelength_locking", "WVLL": "wavelength_locking",
+        "6": "backplane", "BACK": "backplane",
+    }
+
+    def set_modulation_source(self, source: str) -> None:
+        """Select what modulates the laser output.
+
+        source: 'internal' (internal digital), 'coherence' (coherence
+        control), 'analog' or 'digital' (external, via the module's BNC
+        input), 'lf_coherence', 'wavelength_locking', or 'backplane'
+        (external digital via the mainframe Input Trigger connector).
+
+        Selecting a source does not start modulation — call
+        :meth:`set_modulation_on`.
+        """
+        code = self._MODULATION_SOURCE[source.lower()]
+        logger.info("Setting modulation source to %s", code)
+        self._write(f"{self._prefix()}:AM:SOUR {code}")
+
+    def get_modulation_source(self) -> str:
+        response = self._query(f"{self._prefix()}:AM:SOUR?").strip().upper().lstrip("+")
+        source = self._MODULATION_SOURCE_READ.get(response, response.lower())
+        logger.debug("Modulation source: %s", source)
+        return source
+
+    def set_modulation_on(self, on: bool) -> None:
+        """Enable or disable amplitude modulation of the laser output."""
+        logger.info("Modulation %s", "ON" if on else "OFF")
+        self._write(f"{self._prefix()}:AM:STAT {1 if on else 0}")
+
+    def is_modulation_on(self) -> bool:
+        state = bool(int(self._query(f"{self._prefix()}:AM:STAT?")))
+        logger.debug("Modulation state: %s", state)
+        return state
+
     # -- power -------------------------------------------------------
     def set_power_unit(self, unit: str = "dBm") -> None:
         """unit: 'dBm' or 'W'."""

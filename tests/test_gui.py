@@ -161,6 +161,65 @@ def test_output_path_selection(qapp, window, visa):
     assert ":OUTP0:CHAN1:PATH LOWS" in visa.writes
 
 
+def test_modulation_mode_selects_source_then_enables(qapp, window, visa):
+    _connect(qapp, window)
+    window.modulation_panel.mode_combo.setCurrentText("External digital")
+    _spin(qapp, 200)
+
+    assert ":SOUR0:CHAN1:AM:SOUR DEXT" in visa.writes
+    assert ":SOUR0:CHAN1:AM:STAT 1" in visa.writes
+    # The source has to be chosen before modulation is switched on.
+    assert (visa.writes.index(":SOUR0:CHAN1:AM:SOUR DEXT")
+            < visa.writes.index(":SOUR0:CHAN1:AM:STAT 1"))
+    assert visa._am_on and visa._am_source == 3
+
+
+def test_modulation_off_disables_without_touching_the_source(qapp, window, visa):
+    _connect(qapp, window)
+    window.modulation_panel.mode_combo.setCurrentText("Coherence control")
+    _spin(qapp, 200)
+    window.modulation_panel.mode_combo.setCurrentText("Off")
+    _spin(qapp, 200)
+
+    assert ":SOUR0:CHAN1:AM:STAT 0" in visa.writes
+    assert not visa._am_on
+    # Switching off leaves the selected source alone, so the module keeps it.
+    assert visa._am_source == 1
+
+
+def test_modulation_panel_shows_the_instrument_state_on_connect(qapp, window, visa):
+    visa._am_source = 6
+    visa._am_on = True
+    _connect(qapp, window)
+    _spin(qapp, 200)
+    assert window.modulation_panel.mode_combo.currentText() == "Backplane"
+    # Backplane and the external modes are incompatible with lambda logging.
+    assert "lambda logging" in window.modulation_panel.note_label.text()
+
+
+def test_input_trigger_mode_selection(qapp, window, visa):
+    _connect(qapp, window)
+    window.trigger_panel.input_combo.setCurrentText("Next step")
+    _spin(qapp, 200)
+    assert ":TRIG0:CHAN1:INP NEXT" in visa.writes
+
+    window.trigger_panel.config_combo.setCurrentText("Default")
+    _spin(qapp, 200)
+    assert ":TRIG:CONF DEF" in visa.writes
+
+
+def test_trigger_panel_shows_the_instrument_state_on_connect(qapp, window, visa):
+    visa._input_trigger = "SWST"
+    visa._trigger_config = "PASS"
+    _connect(qapp, window)
+    _spin(qapp, 200)
+
+    assert window.trigger_panel.input_combo.currentText() == "Start sweep"
+    assert window.trigger_panel.config_combo.currentText() == "Pass through"
+    # Reflecting the readback must not command the instrument back.
+    assert not _commands(visa, ":TRIG0:CHAN1:INP S")
+
+
 def test_sweep_configures_starts_then_returns_to_idle(qapp, window, visa):
     _connect(qapp, window)
     window.sweep_panel.start_spin.setValue(1530.0)
