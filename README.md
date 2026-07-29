@@ -95,7 +95,7 @@ laser source module. It measures nothing, because the module has no detector.
 - **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`
   runs `:WAV:SWE:CHEC?` and reports the problem in place; `Start` re-checks
   before it will start, so a bad range never reaches the hardware.
-- **Trigger** — what an incoming trigger on the rear-panel Input BNC does to
+- **Trigger** — what an incoming trigger on the mainframe's Input BNC does to
   the module (ignore it, start a sweep, or advance a stepped sweep by one
   step), plus the mainframe's trigger routing. Both are read back when you
   connect. The input connector is ignored entirely while routing is

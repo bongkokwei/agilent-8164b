@@ -243,8 +243,8 @@ class Agilent8164B:
         return path
 
     # -- trigger connectors -------------------------------------------
-    # Two settings are involved in making the rear-panel Input trigger
-    # connector do anything: the mainframe's trigger configuration decides
+    # Two settings are involved in making the mainframe's Input trigger
+    # connector do anything: the trigger configuration decides
     # whether the connector reaches the slots at all, and the per-slot input
     # setting decides what that slot does when it is triggered.
     _TRIGGER_CONFIG = {

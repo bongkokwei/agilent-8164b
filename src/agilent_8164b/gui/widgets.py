@@ -324,7 +324,7 @@ class OutputPanel(QGroupBox):
 
 
 class TriggerPanel(QGroupBox):
-    """What the module does when the rear-panel Input BNC is triggered."""
+    """What the module does when the mainframe's Input BNC is triggered."""
 
     input_mode_requested = pyqtSignal(str)
     configuration_requested = pyqtSignal(str)
