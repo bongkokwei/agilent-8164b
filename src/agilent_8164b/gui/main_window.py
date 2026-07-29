@@ -9,6 +9,7 @@ from PyQt6.QtCore import QMetaObject, QSettings, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -73,7 +74,7 @@ class LaserMainWindow(QMainWindow):
         self._confirm_output = True
 
         self.setWindowTitle("Agilent 8164B laser control")
-        self.resize(980, 720)
+        self.resize(1220, 760)
 
         self._build_ui()
         self._build_menus()
@@ -100,10 +101,16 @@ class LaserMainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.connection_panel)
         left_layout.addWidget(self.readout_panel)
-        left_layout.addWidget(self.output_panel)
-        left_layout.addWidget(self.sweep_panel)
-        left_layout.addWidget(self.modulation_panel)
-        left_layout.addWidget(self.trigger_panel)
+        # The two narrow panels sit beside the tall ones they belong with:
+        # modulation next to the static output settings, triggers next to the
+        # sweep they gate. Both are top-aligned so they keep their natural
+        # height instead of stretching to match their neighbour.
+        for tall, narrow in ((self.output_panel, self.modulation_panel),
+                             (self.sweep_panel, self.trigger_panel)):
+            row = QHBoxLayout()
+            row.addWidget(tall, 3)
+            row.addWidget(narrow, 2, Qt.AlignmentFlag.AlignTop)
+            left_layout.addLayout(row)
         left_layout.addStretch(1)
 
         log_box = QGroupBox("Log")
@@ -115,7 +122,7 @@ class LaserMainWindow(QMainWindow):
         splitter.addWidget(log_box)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([420, 760])
+        splitter.setSizes([700, 520])
         self.setCentralWidget(splitter)
 
         self.status_label = QLabel("Not connected")
