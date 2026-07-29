@@ -323,6 +323,76 @@ class OutputPanel(QGroupBox):
         self._style_laser_button(on)
 
 
+class ModulationPanel(QGroupBox):
+    """Modulation source for the laser output.
+
+    The entries mirror the module's own External Modulation menu, with an Off
+    entry for disabling modulation altogether. Internal digital modulation and
+    low-frequency coherence control are driver-level only: they are not on the
+    module's menu, so they are not offered here.
+    """
+
+    #: 'off' is not a source — it disables modulation with :AM:STATe.
+    mode_requested = pyqtSignal(str)
+
+    _MODES = {
+        "Off": "off",
+        "External digital": "digital",
+        "External analog": "analog",
+        "Wavelength locking": "wavelength_locking",
+        "Backplane": "backplane",
+        "Coherence control": "coherence",
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("Modulation", parent)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(self._MODES.keys())
+        self.mode_combo.setToolTip(
+            "External digital/analog are driven through the BNC input on the "
+            "laser module.\nBackplane takes the same digital signal from the "
+            "mainframe Input Trigger connector instead, so it needs the "
+            "trigger routing below to be enabled."
+        )
+
+        self.note_label = QLabel("")
+        self.note_label.setWordWrap(True)
+        self.note_label.setStyleSheet("color: palette(mid);")
+
+        form = QFormLayout(self)
+        form.addRow("Mode", self.mode_combo)
+        form.addRow(self.note_label)
+
+        self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+
+    def _on_mode_changed(self, text: str) -> None:
+        mode = self._MODES[text]
+        self._show_note(mode)
+        self.mode_requested.emit(mode)
+
+    def _show_note(self, mode: str) -> None:
+        # A sweep with lambda logging refuses to start unless modulation is
+        # off or set to coherence control, so say so before the sweep fails.
+        if mode in ("off", "coherence"):
+            self.note_label.setText("")
+        else:
+            self.note_label.setText(
+                "Blocks a continuous sweep with lambda logging — the "
+                "instrument allows only coherence control or off."
+            )
+
+    def set_mode_silently(self, mode: str) -> None:
+        """Show what the instrument reports without commanding it back."""
+        label = next((k for k, v in self._MODES.items() if v == mode), None)
+        if label is None:
+            return
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText(label)
+        self.mode_combo.blockSignals(False)
+        self._show_note(mode)
+
+
 class TriggerPanel(QGroupBox):
     """What the module does when the mainframe's Input BNC is triggered."""
 

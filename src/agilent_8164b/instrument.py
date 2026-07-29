@@ -316,6 +316,68 @@ class Agilent8164B:
         logger.debug("Input trigger mode: %s", mode)
         return mode
 
+    # -- modulation ----------------------------------------------------
+    # The two external modes are driven through the BNC input on the laser
+    # module itself. 'backplane' is the exception: it takes the same digital
+    # signal from the mainframe's Input Trigger connector (or from another
+    # module's output trigger, with the routing set to loopback), so it needs
+    # the trigger configuration above to be enabled.
+    _MODULATION_SOURCE = {
+        "internal": "INT1",
+        "coherence": "COHC",
+        "analog": "AEXT",
+        "digital": "DEXT",
+        # The manual documents 'LFCohctrl' as value 4 but leaves both the
+        # mnemonic and the number out of the command's own syntax line, so
+        # send the bare code and let the instrument reject it if unsupported.
+        "lf_coherence": "4",
+        "wavelength_locking": "WVLL",
+        "backplane": "BACK",
+    }
+
+    #: :AM:SOUR? answers with the numeric code; mnemonics are accepted too in
+    #: case a module's firmware echoes what it was sent.
+    _MODULATION_SOURCE_READ = {
+        "0": "internal", "INT": "internal", "INT1": "internal",
+        "1": "coherence", "COHC": "coherence", "INT2": "coherence",
+        "2": "analog", "AEXT": "analog", "EXT": "analog",
+        "3": "digital", "DEXT": "digital",
+        "4": "lf_coherence", "LFC": "lf_coherence",
+        "5": "wavelength_locking", "WVLL": "wavelength_locking",
+        "6": "backplane", "BACK": "backplane",
+    }
+
+    def set_modulation_source(self, source: str) -> None:
+        """Select what modulates the laser output.
+
+        source: 'internal' (internal digital), 'coherence' (coherence
+        control), 'analog' or 'digital' (external, via the module's BNC
+        input), 'lf_coherence', 'wavelength_locking', or 'backplane'
+        (external digital via the mainframe Input Trigger connector).
+
+        Selecting a source does not start modulation — call
+        :meth:`set_modulation_on`.
+        """
+        code = self._MODULATION_SOURCE[source.lower()]
+        logger.info("Setting modulation source to %s", code)
+        self._write(f"{self._prefix()}:AM:SOUR {code}")
+
+    def get_modulation_source(self) -> str:
+        response = self._query(f"{self._prefix()}:AM:SOUR?").strip().upper().lstrip("+")
+        source = self._MODULATION_SOURCE_READ.get(response, response.lower())
+        logger.debug("Modulation source: %s", source)
+        return source
+
+    def set_modulation_on(self, on: bool) -> None:
+        """Enable or disable amplitude modulation of the laser output."""
+        logger.info("Modulation %s", "ON" if on else "OFF")
+        self._write(f"{self._prefix()}:AM:STAT {1 if on else 0}")
+
+    def is_modulation_on(self) -> bool:
+        state = bool(int(self._query(f"{self._prefix()}:AM:STAT?")))
+        logger.debug("Modulation state: %s", state)
+        return state
+
     # -- power -------------------------------------------------------
     def set_power_unit(self, unit: str = "dBm") -> None:
         """unit: 'dBm' or 'W'."""

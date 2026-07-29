@@ -54,6 +54,7 @@ class LaserWorker(QObject):
     sweep_running_changed = pyqtSignal(bool)
     sweep_checked = pyqtSignal(str)          # "OK" or a problem description
     trigger_state_read = pyqtSignal(str, str)  # input mode, mainframe config
+    modulation_mode_read = pyqtSignal(str)   # source name, or "off"
 
     def __init__(self, poll_interval_ms: int = 200):
         super().__init__()
@@ -112,6 +113,7 @@ class LaserWorker(QObject):
         self.connected.emit(idn)
         self.status.emit(f"Connected to {resource_name}")
         self.read_trigger_state()
+        self.read_modulation_mode()
         if self._poll_timer is not None:
             self._poll_timer.start()
 
@@ -201,6 +203,45 @@ class LaserWorker(QObject):
             self.error.emit("Not connected — cannot set the output path.")
             return
         self._call("set the output path", self._inst.set_output_path, path)
+
+    # -- modulation ----------------------------------------------------
+    @pyqtSlot(str)
+    def set_modulation_mode(self, mode: str) -> None:
+        """Select a modulation source and enable it, or switch modulation off.
+
+        The instrument keeps the source and the on/off state separately, so
+        one dropdown maps onto two commands.
+        """
+        if self._inst is None:
+            self.error.emit("Not connected — cannot set the modulation mode.")
+            return
+        if mode == "off":
+            if not self._failed(self._call("switch modulation off",
+                                           self._inst.set_modulation_on, False)):
+                self.status.emit("Modulation off")
+            return
+        if self._failed(self._call("set the modulation source",
+                                   self._inst.set_modulation_source, mode)):
+            return
+        if not self._failed(self._call("enable modulation",
+                                       self._inst.set_modulation_on, True)):
+            self.status.emit(f"Modulation: {mode.replace('_', ' ')}")
+
+    @pyqtSlot()
+    def read_modulation_mode(self) -> None:
+        """Report the instrument's modulation mode, failing quietly."""
+        if self._inst is None:
+            return
+        try:
+            mode = (
+                self._inst.get_modulation_source()
+                if self._inst.is_modulation_on()
+                else "off"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not read the modulation mode: %s", exc)
+            return
+        self.modulation_mode_read.emit(mode)
 
     # -- triggers ------------------------------------------------------
     @pyqtSlot(str)

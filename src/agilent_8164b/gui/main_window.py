@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from .widgets import (
     ConnectionPanel,
     LogPanel,
+    ModulationPanel,
     OutputPanel,
     ReadoutPanel,
     SweepPanel,
@@ -90,6 +91,7 @@ class LaserMainWindow(QMainWindow):
         self.readout_panel = ReadoutPanel()
         self.output_panel = OutputPanel()
         self.sweep_panel = SweepPanel()
+        self.modulation_panel = ModulationPanel()
         self.trigger_panel = TriggerPanel()
         self.log_panel = LogPanel()
 
@@ -100,6 +102,7 @@ class LaserMainWindow(QMainWindow):
         left_layout.addWidget(self.readout_panel)
         left_layout.addWidget(self.output_panel)
         left_layout.addWidget(self.sweep_panel)
+        left_layout.addWidget(self.modulation_panel)
         left_layout.addWidget(self.trigger_panel)
         left_layout.addStretch(1)
 
@@ -178,6 +181,8 @@ class LaserMainWindow(QMainWindow):
         self.sweep_panel.continue_requested.connect(self.worker.continue_sweep)
         self.sweep_panel.check_requested.connect(self._on_sweep_check)
 
+        self.modulation_panel.mode_requested.connect(self.worker.set_modulation_mode)
+
         self.trigger_panel.input_mode_requested.connect(
             self.worker.set_input_trigger_mode
         )
@@ -195,6 +200,7 @@ class LaserMainWindow(QMainWindow):
         self.worker.sweep_running_changed.connect(self.sweep_panel.set_sweep_running)
         self.worker.sweep_checked.connect(self.sweep_panel.show_check_result)
         self.worker.trigger_state_read.connect(self.trigger_panel.set_state_silently)
+        self.worker.modulation_mode_read.connect(self.modulation_panel.set_mode_silently)
 
         self.laser_on_requested.connect(self.worker.set_laser_on)
         self.sweep_start_requested.connect(self.worker.start_sweep)
@@ -316,6 +322,7 @@ class LaserMainWindow(QMainWindow):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.output_panel.setEnabled(enabled)
         self.sweep_panel.setEnabled(enabled)
+        self.modulation_panel.setEnabled(enabled)
         self.trigger_panel.setEnabled(enabled)
         for action in (self.laser_off_action, self.reset_action, self.errors_action):
             action.setEnabled(enabled)
