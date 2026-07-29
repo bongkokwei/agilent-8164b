@@ -35,6 +35,21 @@ WAVELENGTH_MIN_NM = 1200.0
 WAVELENGTH_MAX_NM = 1700.0
 
 
+def form_layout(parent: QWidget | None = None) -> QFormLayout:
+    """A form layout styled the same way in every panel.
+
+    The panels sit side by side, so their label columns are compared against
+    each other: right-aligned captions and a common growth policy keep the
+    controls on a shared line rather than drifting per panel.
+    """
+    form = QFormLayout(parent) if parent is not None else QFormLayout()
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    form.setHorizontalSpacing(8)
+    form.setVerticalSpacing(6)
+    return form
+
+
 class ConnectionPanel(QGroupBox):
     """VISA resource selection and session control."""
 
@@ -56,13 +71,18 @@ class ConnectionPanel(QGroupBox):
         self.refresh_button = QPushButton("Scan")
         self.refresh_button.setToolTip("List the VISA resources currently visible")
 
+        # Three narrow numbers share one row: given a form row each they
+        # stretch to the width of the resource string, which reads as an
+        # accident rather than a choice.
         self.slot_spin = QSpinBox()
         self.slot_spin.setRange(0, 4)
+        self.slot_spin.setFixedWidth(60)
         self.slot_spin.setToolTip("Mainframe slot holding the laser module")
 
         self.channel_spin = QSpinBox()
         self.channel_spin.setRange(1, 2)
         self.channel_spin.setValue(1)
+        self.channel_spin.setFixedWidth(60)
         self.channel_spin.setToolTip("Channel number (dual-wavelength sources)")
 
         self.timeout_spin = QSpinBox()
@@ -70,6 +90,8 @@ class ConnectionPanel(QGroupBox):
         self.timeout_spin.setSingleStep(500)
         self.timeout_spin.setValue(5000)
         self.timeout_spin.setSuffix(" ms")
+        self.timeout_spin.setFixedWidth(110)
+        self.timeout_spin.setToolTip("VISA timeout")
 
         self.connect_button = QPushButton("Connect")
         self.connect_button.setDefault(True)
@@ -84,15 +106,23 @@ class ConnectionPanel(QGroupBox):
         resource_row.addWidget(self.resource_combo, 1)
         resource_row.addWidget(self.refresh_button)
 
+        module_row = QHBoxLayout()
+        module_row.setSpacing(6)
+        for caption, widget in (("Slot", self.slot_spin),
+                                ("Channel", self.channel_spin),
+                                ("Timeout", self.timeout_spin)):
+            module_row.addWidget(QLabel(caption))
+            module_row.addWidget(widget)
+            module_row.addSpacing(10)
+        module_row.addStretch(1)
+
         button_row = QHBoxLayout()
         button_row.addWidget(self.connect_button)
         button_row.addWidget(self.disconnect_button)
 
-        form = QFormLayout(self)
+        form = form_layout(self)
         form.addRow("Resource", resource_row)
-        form.addRow("Slot", self.slot_spin)
-        form.addRow("Channel", self.channel_spin)
-        form.addRow("Timeout", self.timeout_spin)
+        form.addRow("Module", module_row)
         form.addRow(button_row)
         form.addRow(self.idn_label)
 
@@ -160,11 +190,6 @@ class ReadoutPanel(QGroupBox):
         for label in (self.path_label, self.sweep_label):
             label.setStyleSheet("color: palette(mid);")
 
-        grid = QGridLayout(self)
-        grid.addWidget(self.state_label, 0, 0, 1, 3)
-        grid.addWidget(QLabel("Wavelength"), 1, 0)
-        grid.addWidget(self.wavelength_value, 1, 1)
-        grid.addWidget(QLabel("nm"), 1, 2)
         # ":SOUR:POW?" reads back the commanded power, not a measurement —
         # the source module has no detector — so the label says so.
         power_caption = QLabel("Power (set)")
@@ -172,13 +197,25 @@ class ReadoutPanel(QGroupBox):
             "Read back from the source, i.e. the power the module has been "
             "told to emit. It is not a measurement."
         )
-        grid.addWidget(power_caption, 2, 0)
-        grid.addWidget(self.power_value, 2, 1)
         self.power_unit_label = QLabel("dBm")
-        grid.addWidget(self.power_unit_label, 2, 2)
-        grid.addWidget(self.path_label, 3, 0, 1, 3)
-        grid.addWidget(self.sweep_label, 4, 0, 1, 3)
+
+        # The two readings sit side by side rather than stacked: the panel is
+        # as wide as the whole control column, and one number per row leaves a
+        # caption stranded at one edge and its value at the other.
+        grid = QGridLayout(self)
+        grid.setHorizontalSpacing(8)
+        grid.addWidget(self.state_label, 0, 0, 1, 7)
+        grid.addWidget(QLabel("Wavelength"), 1, 0)
+        grid.addWidget(self.wavelength_value, 1, 1)
+        grid.addWidget(QLabel("nm"), 1, 2)
+        grid.addWidget(power_caption, 1, 4)
+        grid.addWidget(self.power_value, 1, 5)
+        grid.addWidget(self.power_unit_label, 1, 6)
+        grid.addWidget(self.path_label, 2, 0, 1, 3)
+        grid.addWidget(self.sweep_label, 2, 4, 1, 3)
         grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(5, 1)
+        grid.setColumnMinimumWidth(3, 24)  # gutter between the two readings
 
         self.set_output_state(False)
 
@@ -277,7 +314,7 @@ class OutputPanel(QGroupBox):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self.laser_button)
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("Wavelength", wavelength_row)
         form.addRow("Power", power_row)
         form.addRow("Display unit", self.display_unit_combo)
@@ -360,7 +397,7 @@ class ModulationPanel(QGroupBox):
         self.note_label.setWordWrap(True)
         self.note_label.setStyleSheet("color: palette(mid);")
 
-        form = QFormLayout(self)
+        form = form_layout(self)
         form.addRow("Mode", self.mode_combo)
         form.addRow(self.note_label)
 
@@ -431,7 +468,7 @@ class TriggerPanel(QGroupBox):
             "module when this is anything other than Disabled."
         )
 
-        form = QFormLayout(self)
+        form = form_layout(self)
         form.addRow("Input BNC", self.input_combo)
         form.addRow("Routing", self.config_combo)
 
@@ -508,7 +545,7 @@ class SweepPanel(QGroupBox):
         self.check_label = QLabel("")
         self.check_label.setWordWrap(True)
 
-        form = QFormLayout()
+        form = form_layout()
         form.addRow("Start", self.start_spin)
         form.addRow("Stop", self.stop_spin)
         form.addRow("Mode", self.mode_combo)

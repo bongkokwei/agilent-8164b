@@ -8,8 +8,8 @@ from collections import deque
 from PyQt6.QtCore import QMetaObject, QSettings, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -96,22 +96,27 @@ class LaserMainWindow(QMainWindow):
         self.trigger_panel = TriggerPanel()
         self.log_panel = LogPanel()
 
+        # One grid for the whole control column, so the two columns share a
+        # single boundary: laying each row out on its own lets every row
+        # negotiate its own split, and the group boxes end up misaligned.
+        # Modulation sits beside the output settings it modulates, triggers
+        # beside the sweep they gate.
         left_column = QWidget()
-        left_layout = QVBoxLayout(left_column)
+        left_layout = QGridLayout(left_column)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(self.connection_panel)
-        left_layout.addWidget(self.readout_panel)
-        # The two narrow panels sit beside the tall ones they belong with:
-        # modulation next to the static output settings, triggers next to the
-        # sweep they gate. Both are top-aligned so they keep their natural
-        # height instead of stretching to match their neighbour.
-        for tall, narrow in ((self.output_panel, self.modulation_panel),
-                             (self.sweep_panel, self.trigger_panel)):
-            row = QHBoxLayout()
-            row.addWidget(tall, 3)
-            row.addWidget(narrow, 2, Qt.AlignmentFlag.AlignTop)
-            left_layout.addLayout(row)
-        left_layout.addStretch(1)
+        left_layout.setHorizontalSpacing(8)
+        left_layout.setVerticalSpacing(8)
+
+        top = Qt.AlignmentFlag.AlignTop
+        left_layout.addWidget(self.connection_panel, 0, 0, 1, 2)
+        left_layout.addWidget(self.readout_panel, 1, 0, 1, 2)
+        left_layout.addWidget(self.output_panel, 2, 0, top)
+        left_layout.addWidget(self.modulation_panel, 2, 1, top)
+        left_layout.addWidget(self.sweep_panel, 3, 0, top)
+        left_layout.addWidget(self.trigger_panel, 3, 1, top)
+        left_layout.setColumnStretch(0, 3)
+        left_layout.setColumnStretch(1, 2)
+        left_layout.setRowStretch(4, 1)
 
         log_box = QGroupBox("Log")
         log_layout = QVBoxLayout(log_box)
