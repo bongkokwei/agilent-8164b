@@ -137,6 +137,11 @@ class Agilent8164B:
         "two_way": "TWOW",
     }
 
+    # Highest rate at which the module can emit lambda-logging output
+    # triggers. A continuous sweep fires one trigger every :SWE:STEP of
+    # wavelength, so speed/step must stay at or below this.
+    MAX_TRIGGER_FREQ_HZ = 40e3
+
     def _sweep_prefix(self) -> str:
         return f"{self._prefix()}:WAV:SWE"
 
@@ -150,17 +155,26 @@ class Agilent8164B:
         cycles: int = 1,
         mode: str = "step",
         repeat: str = "oneway",
+        check_trigger_freq: bool = True,
     ) -> None:
         """Configure (but do not start) a native wavelength sweep.
 
         mode: 'step' (stepped sweep, uses step_nm/dwell_s) or 'continuous'
         (uses speed_nm_s). repeat: 'oneway' or 'twoway'.
+
+        In continuous mode step_nm does not step the laser -- it sets the
+        wavelength spacing between output triggers, so the implied trigger
+        frequency is speed_nm_s/step_nm. That is rejected up front when it
+        exceeds MAX_TRIGGER_FREQ_HZ; pass check_trigger_freq=False to skip
+        the check if the module's output trigger is disabled.
         """
         logger.info(
             "Configuring %s sweep: %g-%g nm, step=%g nm, speed=%s nm/s, "
             "dwell=%s s, cycles=%d, repeat=%s",
             mode, start_nm, stop_nm, step_nm, speed_nm_s, dwell_s, cycles, repeat,
         )
+        if mode.lower() in ("continuous", "cont") and check_trigger_freq:
+            self._validate_trigger_freq(step_nm, speed_nm_s)
         prefix = self._sweep_prefix()
         self._write(f"{prefix}:MODE {self._SWEEP_MODE[mode.lower()]}")
         self._write(f"{prefix}:STAR {start_nm}NM")
@@ -172,8 +186,31 @@ class Agilent8164B:
             if dwell_s is not None:
                 self._write(f"{prefix}:DWEL {dwell_s}S")
         elif mode.lower() in ("continuous", "cont"):
+            # The step still has to be written here: it is the trigger
+            # spacing, and leaving it unset means the module silently reuses
+            # the value from whatever sweep ran before this one.
+            self._write(f"{prefix}:STEP {step_nm}NM")
             if speed_nm_s is not None:
                 self._write(f"{prefix}:SPE {speed_nm_s}NM/S")
+
+    def _validate_trigger_freq(self, step_nm: float, speed_nm_s: float) -> None:
+        """Reject a continuous sweep that would out-run the trigger output."""
+        if speed_nm_s is None:
+            return
+        if step_nm <= 0:
+            raise ValueError(f"step_nm must be positive, got {step_nm}")
+        trigger_freq = speed_nm_s / step_nm
+        if trigger_freq > self.MAX_TRIGGER_FREQ_HZ:
+            max_speed = self.MAX_TRIGGER_FREQ_HZ * step_nm
+            min_step = speed_nm_s / self.MAX_TRIGGER_FREQ_HZ
+            raise ValueError(
+                f"Sweep needs {trigger_freq:.0f} Hz of output triggers "
+                f"({speed_nm_s} nm/s over {step_nm} nm steps), above the "
+                f"{self.MAX_TRIGGER_FREQ_HZ:.0f} Hz maximum. Reduce the speed "
+                f"to {max_speed:g} nm/s, or coarsen the step to {min_step:g} "
+                f"nm. Pass check_trigger_freq=False if the output trigger is "
+                f"disabled."
+            )
 
     def start_sweep(self) -> None:
         logger.info("Starting sweep")
