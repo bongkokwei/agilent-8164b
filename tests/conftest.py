@@ -41,6 +41,10 @@ class StubVisaResource:
         #: Drop the output on every sweep-state poll — a module that simply
         #: refuses to emit while sweeping.
         self.drop_output_every_sweep_poll = False
+        #: Ignore ``:OUTP:STAT 1`` while a sweep is running and queue a
+        #: settings-conflict error, the way a module that owns the output
+        #: during a sweep does.
+        self.output_locked_while_sweeping = False
         #: Query fragments this module does not implement. A matching query
         #: raises the way a real one times out — modules vary in what they
         #: answer, and a single-output module has no ``:OUTP:PATH?``.
@@ -70,6 +74,7 @@ class StubVisaResource:
         self._trigger_config = "DIS"
         self._am_source = 0        # numeric code, as :AM:SOUR? reports it
         self._am_on = False
+        self._errors: list[str] = []
 
     # -- PyVISA surface ------------------------------------------------
     def write(self, command: str) -> None:
@@ -104,7 +109,13 @@ class StubVisaResource:
     def _apply(self, command: str) -> None:
         upper = command.upper()
         if ":OUTP" in upper and ":STAT" in upper:
-            self._output_on = upper.rstrip().endswith("1")
+            switch_on = upper.rstrip().endswith("1")
+            if switch_on and self.output_locked_while_sweeping and self._sweeping:
+                self._errors.append(
+                    '-221,"Settings conflict; output state is owned by the sweep"'
+                )
+            else:
+                self._output_on = switch_on
         elif ":OUTP" in upper and ":PATH" in upper:
             self._path = upper.rsplit(" ", 1)[-1]
         elif ":WAV:SWE:STAT" in upper:
@@ -156,7 +167,7 @@ class StubVisaResource:
         if upper.startswith("*IDN?"):
             return "HEWLETT-PACKARD,8164B,MY12345678,1.0"
         if upper.startswith(":SYST:ERR?"):
-            return '+0,"No error"'
+            return self._errors.pop(0) if self._errors else '+0,"No error"'
         if ":OUTP" in upper and ":STAT?" in upper:
             return "+1" if self._output_on else "+0"
         if ":OUTP" in upper and ":PATH?" in upper:

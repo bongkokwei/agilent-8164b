@@ -362,6 +362,28 @@ def test_a_module_that_insists_on_the_output_being_off_is_left_alone(qapp, windo
     assert "keeps switching the output off" in window.status_label.text()
 
 
+def test_a_refused_output_reports_what_the_module_said(qapp, window, visa):
+    # A module that owns the output during a sweep accepts :OUTP:STAT 1 and
+    # ignores it. Retrying that is pointless; the user needs the reason.
+    visa.SWEEP_POLLS = 60
+    visa.drop_output_after_sweep_polls = 2
+    visa.output_locked_while_sweeping = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+    switch_ons = visa.writes.count(":OUTP0:CHAN1:STAT 1")
+
+    window.sweep_panel.start_button.click()
+    for _ in range(100):
+        _spin(qapp, 20)
+        if not window.worker._hold_output_on:
+            break
+
+    assert "Settings conflict" in window.status_label.text()
+    # One attempt, one answer — no hammering away at a refusal.
+    assert visa.writes.count(":OUTP0:CHAN1:STAT 1") - switch_ons == 1
+
+
 def test_switching_the_output_off_wins_over_the_hold(qapp, window, visa):
     # The hold must never switch an output back on that the user has just
     # switched off, however keen the sweep is to keep emitting.

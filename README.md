@@ -107,8 +107,10 @@ laser source module. It measures nothing, because the module has no detector.
   later — while the module retunes to the start wavelength — is caught by the
   poll loop and switched back on. Only an output that was on beforehand is
   ever restored, the hold is released the moment the sweep ends or you touch
-  the output yourself, and it gives up after three attempts rather than
-  fighting a module that insists on staying dark.
+  the output yourself, and attempts are a second apart so a module that is
+  merely tuning to the start wavelength is left to finish. `:OUTP:STAT 1` is
+  read back rather than assumed: a module that accepts it and ignores it is
+  asked why, and the SCPI error is reported instead of being retried.
 - **Modulation** — the module's External Modulation menu: external digital and
   external analog (both driven through the BNC input on the laser module),
   wavelength locking, backplane, coherence control, plus Off. Selecting a mode

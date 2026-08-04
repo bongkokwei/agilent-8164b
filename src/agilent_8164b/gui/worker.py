@@ -83,6 +83,7 @@ class LaserWorker(QObject):
         self._hold_attempts = 0
         self._hold_saw_sweeping = False
         self._hold_armed_tick = 0
+        self._hold_next_attempt_tick = 0
 
     # -- lifecycle -----------------------------------------------------
     @property
@@ -208,16 +209,41 @@ class LaserWorker(QObject):
         self._hold_output_on = False
         self._hold_attempts = 0
         self._hold_saw_sweeping = False
+        self._hold_next_attempt_tick = 0
 
-    def _restore_output(self) -> None:
-        """Switch the output back on if the instrument dropped it."""
+    def _restore_output(self) -> bool:
+        """Switch the output back on if the instrument dropped it.
+
+        Returns False only when the module has actually refused: ``:OUTP:STAT
+        1`` is accepted silently by a module that then ignores it, so the
+        state is read back and, if it is still off, the SCPI error queue is
+        asked why. An empty error queue means the module is simply taking its
+        time, which is not a refusal — the caller may try again.
+        """
         state = self._call("read the output state", self._inst.is_laser_on)
         if self._failed(state) or state:
-            return
+            return True
         if self._failed(self._call("switch the laser back on", self._inst.laser_on)):
-            return
-        self._laser_on = True
-        self.status.emit("Output switched back on after the sweep turned it off")
+            return True
+        state = self._call("read the output state", self._inst.is_laser_on)
+        if self._failed(state) or state:
+            self._laser_on = True
+            self.status.emit("Output switched back on after the sweep turned it off")
+            return True
+
+        reason = self._call("read the error queue", self._inst.check_errors)
+        if self._failed(reason) or self._no_error(reason):
+            return True  # too early to tell; the state may still catch up
+        self.error.emit(
+            f"The module refused to switch the output back on: {reason}. "
+            "The sweep is running with the output off."
+        )
+        return False
+
+    @staticmethod
+    def _no_error(entry: str) -> bool:
+        """True for the 'queue empty' reply, whichever way it is spelled."""
+        return entry.strip().lstrip("+").startswith("0")
 
     # -- output control ------------------------------------------------
     @pyqtSlot(bool)
@@ -402,6 +428,9 @@ class LaserWorker(QObject):
             self._hold_attempts = 0
             self._hold_saw_sweeping = False
             self._hold_armed_tick = self._poll_tick
+            # Give the module time to reach the start wavelength before
+            # reading anything into an output that is off.
+            self._hold_next_attempt_tick = self._poll_tick + self.HOLD_RETRY_POLLS
         self._was_sweeping = True
         self.sweep_running_changed.emit(True)
         self.status.emit("Sweep started")
@@ -465,6 +494,11 @@ class LaserWorker(QObject):
     #: Polls the hold waits for the sweep to appear before deciding it never
     #: started. At the default 200 ms tick that is a five second grace.
     HOLD_GRACE_POLLS = 25
+
+    #: Polls between attempts. A module is off while it tunes to the start
+    #: wavelength and switches back on by itself when it arrives, so the hold
+    #: waits a second before each try instead of hammering it mid-retune.
+    HOLD_RETRY_POLLS = 5
 
     #: Failures of one optional reading before it is dropped for this session.
     #: Not every module implements every query — a single-output module has no
@@ -536,16 +570,22 @@ class LaserWorker(QObject):
 
         if getattr(self, "_laser_on", False):
             return
+        if self._poll_tick < self._hold_next_attempt_tick:
+            return
         if self._hold_attempts >= self.MAX_HOLD_ATTEMPTS:
             self._release_output_hold()
             self.error.emit(
-                "The module keeps switching the output off during the sweep. "
-                "Left off after "
-                f"{self.MAX_HOLD_ATTEMPTS} attempts to switch it back on."
+                "The module keeps switching the output off during the sweep, "
+                f"over {self.MAX_HOLD_ATTEMPTS} attempts to switch it back on. "
+                "Left off — check the error queue and the sweep mode."
             )
             return
         self._hold_attempts += 1
-        self._restore_output()
+        self._hold_next_attempt_tick = self._poll_tick + self.HOLD_RETRY_POLLS
+        if not self._restore_output():
+            # The module said why, so there is nothing to be gained by asking
+            # it again — the reason is already in front of the user.
+            self._release_output_hold()
 
     def _on_poll_failure(self, exc: Exception) -> None:
         """Absorb a failed poll, giving up only once they keep failing.
