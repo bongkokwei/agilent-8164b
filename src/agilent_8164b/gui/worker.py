@@ -65,6 +65,8 @@ class LaserWorker(QObject):
         self._was_sweeping = False
         self._power_unit = "dBm"
         self._poll_tick = 0
+        self._poll_failures = 0
+        self._optional_failures: dict = {}
 
     # -- lifecycle -----------------------------------------------------
     @property
@@ -111,6 +113,8 @@ class LaserWorker(QObject):
 
         self._was_sweeping = False
         self._poll_tick = 0
+        self._poll_failures = 0
+        self._optional_failures = {}
         self.connected.emit(idn)
         self.status.emit(f"Connected to {resource_name}")
         self.read_trigger_state()
@@ -407,6 +411,16 @@ class LaserWorker(QObject):
             self.status.emit("Error queue: " + "; ".join(errors))
 
     # -- polling -------------------------------------------------------
+    #: Consecutive failures of the core readings tolerated before the loop
+    #: gives up. A single timeout is normal while the module is busy, and
+    #: stopping on it leaves the readout dead for the rest of the session.
+    MAX_POLL_FAILURES = 5
+
+    #: Failures of one optional reading before it is dropped for this session.
+    #: Not every module implements every query — a single-output module has no
+    #: :OUTP:PATH? — so those must not take the readout down with them.
+    MAX_OPTIONAL_FAILURES = 3
+
     @pyqtSlot()
     def _poll(self) -> None:
         """Sample the instrument state for the readouts and the live plot."""
@@ -416,15 +430,20 @@ class LaserWorker(QObject):
             wavelength_nm = self._inst.get_wavelength_nm()
             power = self._inst.get_power()
             sweeping = self._inst.is_sweeping()
-            # The output state and path change rarely, so ask less often and
-            # keep the polling loop cheap while a sweep is running.
-            if self._poll_tick % 5 == 0:
-                self._laser_on = self._inst.is_laser_on()
-                self._output_path = self._inst.get_output_path()
         except Exception as exc:  # noqa: BLE001
-            self._poll_timer.stop()
-            self.error.emit(f"Polling stopped after a communication error: {exc}")
+            self._on_poll_failure(exc)
             return
+        self._poll_failures = 0
+
+        # The output state and path change rarely, so ask less often and keep
+        # the polling loop cheap while a sweep is running.
+        if self._poll_tick % 5 == 0:
+            self._laser_on = self._read_optional(
+                "output state", "is_laser_on", getattr(self, "_laser_on", False)
+            )
+            self._output_path = self._read_optional(
+                "output path", "get_output_path", getattr(self, "_output_path", "")
+            )
 
         self._poll_tick += 1
         self.state_polled.emit({
@@ -441,3 +460,59 @@ class LaserWorker(QObject):
             self.sweep_running_changed.emit(sweeping)
             if not sweeping:
                 self.status.emit("Sweep finished")
+
+    def _on_poll_failure(self, exc: Exception) -> None:
+        """Absorb a failed poll, giving up only once they keep failing.
+
+        A timeout leaves the session out of step — the late response would be
+        read as the answer to the next query — so the interface is cleared
+        before the next tick rather than carrying the confusion forward.
+        """
+        self._poll_failures += 1
+        try:
+            self._inst.clear_interface()
+        except Exception as clear_exc:  # noqa: BLE001
+            logger.warning("Could not clear the interface: %s", clear_exc)
+        if self._poll_failures < self.MAX_POLL_FAILURES:
+            logger.warning(
+                "Poll %d of %d failed, retrying: %s",
+                self._poll_failures, self.MAX_POLL_FAILURES, exc,
+            )
+            return
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        self.error.emit(
+            f"Polling stopped after {self._poll_failures} failed attempts: {exc}"
+        )
+
+    def _read_optional(self, description: str, method_name: str, fallback):
+        """Read something the readout can do without, keeping the last value.
+
+        Modules differ in what they implement, and a query the module does not
+        answer must not stop the wavelength and power from updating. After
+        :attr:`MAX_OPTIONAL_FAILURES` tries the reading is dropped for the rest
+        of the session instead of costing a timeout on every poll.
+        """
+        if self._optional_failures.get(description, 0) >= self.MAX_OPTIONAL_FAILURES:
+            return fallback
+        try:
+            value = getattr(self._inst, method_name)()
+        except Exception as exc:  # noqa: BLE001
+            failures = self._optional_failures.get(description, 0) + 1
+            self._optional_failures[description] = failures
+            try:
+                self._inst.clear_interface()
+            except Exception as clear_exc:  # noqa: BLE001
+                logger.warning("Could not clear the interface: %s", clear_exc)
+            if failures >= self.MAX_OPTIONAL_FAILURES:
+                message = (
+                    f"Giving up on the {description}: the module did not "
+                    f"answer ({exc}). Wavelength and power keep updating."
+                )
+                logger.warning("%s", message)
+                self.status.emit(message)
+            else:
+                logger.warning("Could not read the %s: %s", description, exc)
+            return fallback
+        self._optional_failures[description] = 0
+        return value

@@ -68,6 +68,20 @@ class Agilent8164B:
         logger.debug("query: %s -> %s", cmd, response)
         return response
 
+    def clear_interface(self) -> None:
+        """Resynchronise the session after a query went unanswered.
+
+        A timed-out query can still be answered later, and that stale response
+        would be read as the answer to the next one. Clearing the device drops
+        it. Not every backend implements ``clear()``, so its absence is not an
+        error; ``*CLS`` is sent either way to empty the status and error queue.
+        """
+        logger.debug("Clearing the interface after a failed transfer")
+        clear = getattr(self._inst, "clear", None)
+        if clear is not None:
+            clear()
+        self._write("*CLS")
+
     def check_errors(self) -> str:
         """Return the next entry from the SCPI error queue."""
         error = self._query(":SYST:ERR?")

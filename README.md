@@ -91,7 +91,11 @@ laser source module. It measures nothing, because the module has no detector.
   plus the output path. A red banner appears whenever the output is emitting.
   "Power (set)" is a `:SOUR:POW?` readback of the commanded power — it is the
   setpoint, not a measurement, and does not respond to anything downstream of
-  the output connector.
+  the output connector. The output state and path are read less often than the
+  wavelength, and a module that does not answer them (a single-output module
+  has no `:OUTP:PATH?`) loses only those two lines — the wavelength and power
+  keep updating. Polling rides out a few timed-out queries, clearing the
+  session each time, and only gives up once they persist.
 - **Output** — laser on/off, wavelength, power (`dBm`/`mW`/`uW`/`nW`), the unit
   the instrument reports in, and the output path for dual-output modules.
 - **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`

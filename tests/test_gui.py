@@ -145,6 +145,48 @@ def test_setting_wavelength_updates_readout(qapp, window, visa):
     assert "1543.21" in window.readout_panel.wavelength_value.text()
 
 
+def test_readout_survives_a_query_the_module_does_not_answer(qapp, window, visa):
+    # A single-output module has no :OUTP:PATH?, and that must not take the
+    # wavelength and power readings down with it.
+    visa.unsupported_queries = {":PATH?"}
+    _connect(qapp, window)
+    _spin(qapp, 400)
+
+    assert window.readout_panel.wavelength_value.text() != "—"
+    assert window.readout_panel.power_value.text() != "—"
+    assert window.worker._poll_timer.isActive()
+
+    # The unanswered reading is dropped rather than costing a timeout forever.
+    attempts = len(_commands(visa, ":PATH?"))
+    assert attempts == window.worker.MAX_OPTIONAL_FAILURES
+    _spin(qapp, 400)
+    assert len(_commands(visa, ":PATH?")) == attempts
+
+
+def test_readout_recovers_from_a_transient_timeout(qapp, window, visa):
+    _connect(qapp, window)
+    _spin(qapp, 100)
+    visa.failing_queries = 2
+    _spin(qapp, 400)
+
+    assert window.worker._poll_timer.isActive()
+    assert visa.clears > 0  # the session was resynchronised, not left confused
+    assert window.readout_panel.wavelength_value.text() != "—"
+
+
+def test_polling_gives_up_once_the_failures_persist(qapp, window, visa):
+    _connect(qapp, window)
+    _spin(qapp, 100)
+    visa.failing_queries = 10 * window.worker.MAX_POLL_FAILURES
+    for _ in range(100):
+        _spin(qapp, 20)
+        if not window.worker._poll_timer.isActive():
+            break
+
+    assert not window.worker._poll_timer.isActive()
+    assert "Polling stopped" in window.status_label.text()
+
+
 def test_setting_power_sends_unit_suffix(qapp, window, visa):
     _connect(qapp, window)
     window.output_panel.power_spin.setValue(2.5)

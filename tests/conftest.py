@@ -34,6 +34,15 @@ class StubVisaResource:
         #: Modules retune when the sweep parameters are written and switch the
         #: optical output off while they do. Set this to reproduce that.
         self.output_drops_on_sweep_config = False
+        #: Query fragments this module does not implement. A matching query
+        #: raises the way a real one times out — modules vary in what they
+        #: answer, and a single-output module has no ``:OUTP:PATH?``.
+        self.unsupported_queries: set = set()
+        #: Fail this many upcoming queries, whatever they are, then behave.
+        #: Models a transient timeout rather than a missing feature.
+        self.failing_queries = 0
+        #: Counts ``clear()`` calls, i.e. session resynchronisations.
+        self.clears = 0
         self.timeout = None
         self.read_termination = None
         self.write_termination = None
@@ -61,10 +70,18 @@ class StubVisaResource:
 
     def query(self, command: str) -> str:
         self.writes.append(command)
+        if self.failing_queries > 0:
+            self.failing_queries -= 1
+            raise TimeoutError(f"VI_ERROR_TMO on {command!r}")
+        if any(fragment in command.upper() for fragment in self.unsupported_queries):
+            raise TimeoutError(f"VI_ERROR_TMO on {command!r}")
         response = self._respond(command)
         if response is None:
             raise AssertionError(f"stub received an unrecognised query: {command!r}")
         return response
+
+    def clear(self) -> None:
+        self.clears += 1
 
     def close(self) -> None:
         self.closed = True
