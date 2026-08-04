@@ -570,7 +570,16 @@ class SweepPanel(QGroupBox):
         compact(self.speed_spin)
 
         self.cycles_spin = QSpinBox()
-        self.cycles_spin.setRange(1, 1000)
+        # 0 is the instrument's "repeat until stopped" setting, so it is the
+        # bottom of the range rather than an invalid entry. A spin box shows
+        # its special value text in place of the minimum.
+        self.cycles_spin.setRange(0, 1000)
+        self.cycles_spin.setValue(1)
+        self.cycles_spin.setSpecialValueText("Infinite")
+        self.cycles_spin.setToolTip(
+            "Number of sweep cycles. 0 (shown as Infinite) sweeps until you "
+            "press Stop."
+        )
         compact(self.cycles_spin)
 
         self.repeat_combo = QComboBox()
