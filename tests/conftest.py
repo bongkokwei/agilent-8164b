@@ -41,10 +41,13 @@ class StubVisaResource:
         #: Drop the output on every sweep-state poll — a module that simply
         #: refuses to emit while sweeping.
         self.drop_output_every_sweep_poll = False
-        #: Ignore ``:OUTP:STAT 1`` while a sweep is running and queue a
-        #: settings-conflict error, the way a module that owns the output
-        #: during a sweep does.
+        #: Ignore ``:OUTP:STAT 1`` while a sweep is running and queue an
+        #: execution error, the way a module that owns the output during a
+        #: sweep does.
         self.output_locked_while_sweeping = False
+        #: Ignore ``:OUTP:STAT 1`` outright, sweep or no sweep — an open
+        #: interlock, say. The error queue carries the reason.
+        self.refuse_output_on = False
         #: Query fragments this module does not implement. A matching query
         #: raises the way a real one times out — modules vary in what they
         #: answer, and a single-output module has no ``:OUTP:PATH?``.
@@ -110,10 +113,12 @@ class StubVisaResource:
         upper = command.upper()
         if ":OUTP" in upper and ":STAT" in upper:
             switch_on = upper.rstrip().endswith("1")
-            if switch_on and self.output_locked_while_sweeping and self._sweeping:
-                self._errors.append(
-                    '-221,"Settings conflict; output state is owned by the sweep"'
-                )
+            refused = switch_on and (
+                self.refuse_output_on
+                or (self.output_locked_while_sweeping and self._sweeping)
+            )
+            if refused:
+                self._errors.append('-200,"Execution error (StatExecError)"')
             else:
                 self._output_on = switch_on
         elif ":OUTP" in upper and ":PATH" in upper:

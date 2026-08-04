@@ -101,16 +101,19 @@ laser source module. It measures nothing, because the module has no detector.
 - **Wavelength sweep** — the full `configure_sweep()` parameter set. `Check`
   runs `:WAV:SWE:CHEC?` and reports the problem in place; `Start` re-checks
   before it will start, so a bad range never reaches the hardware. Setting
-  `Cycles` to 0 (shown as `Infinite`) sweeps until you press `Stop`. If the
-  module drops the optical output while it takes the sweep parameters, the
-  output is handed back before the sweep is started, and a drop that happens
-  later — while the module retunes to the start wavelength — is caught by the
-  poll loop and switched back on. Only an output that was on beforehand is
-  ever restored, the hold is released the moment the sweep ends or you touch
-  the output yourself, and attempts are a second apart so a module that is
-  merely tuning to the start wavelength is left to finish. `:OUTP:STAT 1` is
-  read back rather than assumed: a module that accepts it and ignores it is
-  asked why, and the SCPI error is reported instead of being retried.
+  `Cycles` to 0 (shown as `Infinite`) sweeps until you press `Stop`.
+
+  The module owns the optical output while it sweeps: it takes the output
+  down to retune, and answers `:OUTP:STAT 1` with `-200,"Execution error"`
+  until the sweep ends. So the GUI makes sure the output is on *before* it
+  sends the start command — including switching it back on if writing the
+  sweep parameters dropped it — and then leaves the output alone for the
+  duration, saying once in the status bar that the module has taken it. When
+  the sweep ends or you stop it, an output that was on beforehand is switched
+  back on; one you had left off stays off, and switching the output off
+  yourself cancels the restore. `:OUTP:STAT 1` is read back rather than
+  assumed, and if the module still will not emit, its own error-queue entry
+  is reported instead of a retry loop.
 - **Modulation** — the module's External Modulation menu: external digital and
   external analog (both driven through the BNC input on the laser module),
   wavelength locking, backplane, coherence control, plus Off. Selecting a mode

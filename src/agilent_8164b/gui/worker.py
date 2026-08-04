@@ -47,6 +47,10 @@ class _OutputGuard:
         if self.was_on:
             self._worker._restore_output()
 
+    def disarm(self) -> None:
+        """Give up the claim on the output — something else owns it now."""
+        self.was_on = False
+
 
 class LaserWorker(QObject):
     """Owns the driver instance and executes every instrument call.
@@ -79,11 +83,12 @@ class LaserWorker(QObject):
         self._poll_tick = 0
         self._poll_failures = 0
         self._optional_failures: dict = {}
-        self._hold_output_on = False
-        self._hold_attempts = 0
-        self._hold_saw_sweeping = False
-        self._hold_armed_tick = 0
-        self._hold_next_attempt_tick = 0
+        self._pending_output_restore = False
+        self._restore_attempts = 0
+        self._saw_sweeping = False
+        self._armed_tick = 0
+        self._next_attempt_tick = 0
+        self._announced_output_off = False
 
     # -- lifecycle -----------------------------------------------------
     @property
@@ -144,7 +149,7 @@ class LaserWorker(QObject):
         """Close the session, leaving the output off behind us."""
         if self._poll_timer is not None:
             self._poll_timer.stop()
-        self._release_output_hold()
+        self._clear_pending_restore()
         if self._inst is None:
             self.disconnected.emit()
             return
@@ -204,12 +209,13 @@ class LaserWorker(QObject):
         finally:
             guard.restore()
 
-    def _release_output_hold(self) -> None:
+    def _clear_pending_restore(self) -> None:
         """Stop watching the output — the user or the sweep has moved on."""
-        self._hold_output_on = False
-        self._hold_attempts = 0
-        self._hold_saw_sweeping = False
-        self._hold_next_attempt_tick = 0
+        self._pending_output_restore = False
+        self._restore_attempts = 0
+        self._saw_sweeping = False
+        self._next_attempt_tick = 0
+        self._announced_output_off = False
 
     def _restore_output(self) -> bool:
         """Switch the output back on if the instrument dropped it.
@@ -253,7 +259,7 @@ class LaserWorker(QObject):
             return
         # An explicit command is the last word on the output: it replaces
         # whatever the sweep was holding, in either direction.
-        self._release_output_hold()
+        self._clear_pending_restore()
         action = self._inst.laser_on if on else self._inst.laser_off
         if self._failed(self._call(f"switch the laser {'on' if on else 'off'}", action)):
             return
@@ -398,8 +404,10 @@ class LaserWorker(QObject):
         if self._inst is None:
             self.error.emit("Not connected — cannot start a sweep.")
             return
-        # Everything from here to the running sweep can make the module drop
-        # the output; the guard hands it back at the end, whichever step it is.
+        # Configuring can make the module drop the output; the guard hands it
+        # back, and does so before the start command, because once the sweep
+        # is running the module refuses to switch the output at all.
+        was_on = False
         with self._output_preserved() as output:
             if config is not None:
                 if self._failed(self._call("configure the sweep",
@@ -420,17 +428,19 @@ class LaserWorker(QObject):
             output.restore()
             if self._failed(self._call("start the sweep", self._inst.start_sweep)):
                 return
-        if output.was_on:
-            # The drop can also come after the start command is acknowledged,
-            # while the module retunes to the start wavelength — too late for
-            # the check above to see it, so the poll loop keeps watch.
-            self._hold_output_on = True
-            self._hold_attempts = 0
-            self._hold_saw_sweeping = False
-            self._hold_armed_tick = self._poll_tick
-            # Give the module time to reach the start wavelength before
-            # reading anything into an output that is off.
-            self._hold_next_attempt_tick = self._poll_tick + self.HOLD_RETRY_POLLS
+            # The sweep owns the output from here. Asking for it back now only
+            # earns an execution error, so the guard stands down and the poll
+            # loop picks it up when the sweep ends.
+            was_on = output.was_on
+            output.disarm()
+        if was_on:
+            # The module takes the output down to retune and will not give it
+            # back while it sweeps, so the poll loop watches for the end of
+            # the sweep and hands the output back then.
+            self._clear_pending_restore()
+            self._pending_output_restore = True
+            self._armed_tick = self._poll_tick
+            self._next_attempt_tick = self._poll_tick + self.RESTORE_RETRY_POLLS
         self._was_sweeping = True
         self.sweep_running_changed.emit(True)
         self.status.emit("Sweep started")
@@ -440,7 +450,10 @@ class LaserWorker(QObject):
         if self._inst is None:
             self.error.emit("Not connected — cannot stop the sweep.")
             return
-        self._release_output_hold()
+        # Stopping does not cancel the restore — it is what allows it: the
+        # output only comes back once the sweep has let go of it.
+        self._saw_sweeping = True
+        self._next_attempt_tick = self._poll_tick
         self._call("stop the sweep", self._inst.stop_sweep)
         self._was_sweeping = False
         self.sweep_running_changed.emit(False)
@@ -451,6 +464,9 @@ class LaserWorker(QObject):
         if self._inst is None:
             self.error.emit("Not connected — cannot pause the sweep.")
             return
+        # A paused sweep still owns the module, and pausing is deliberate, so
+        # the output is left exactly as the sweep has it.
+        self._clear_pending_restore()
         if not self._failed(self._call("pause the sweep", self._inst.pause_sweep)):
             self.status.emit("Sweep paused")
 
@@ -489,16 +505,16 @@ class LaserWorker(QObject):
     #: How many times the output is switched back on during one sweep before
     #: the hold gives up. Bounded so a module that insists on keeping the
     #: output off is argued with briefly, then left alone.
-    MAX_HOLD_ATTEMPTS = 3
+    MAX_RESTORE_ATTEMPTS = 3
 
     #: Polls the hold waits for the sweep to appear before deciding it never
     #: started. At the default 200 ms tick that is a five second grace.
-    HOLD_GRACE_POLLS = 25
+    SWEEP_START_GRACE_POLLS = 25
 
     #: Polls between attempts. A module is off while it tunes to the start
     #: wavelength and switches back on by itself when it arrives, so the hold
     #: waits a second before each try instead of hammering it mid-retune.
-    HOLD_RETRY_POLLS = 5
+    RESTORE_RETRY_POLLS = 5
 
     #: Failures of one optional reading before it is dropped for this session.
     #: Not every module implements every query — a single-output module has no
@@ -520,10 +536,10 @@ class LaserWorker(QObject):
         self._poll_failures = 0
 
         # The output state and path change rarely, so ask less often and keep
-        # the polling loop cheap while a sweep is running. While the hold is
-        # armed the output state is worth every tick: the sooner a drop is
-        # seen, the less of the sweep runs dark.
-        if self._hold_output_on or self._poll_tick % 5 == 0:
+        # the polling loop cheap while a sweep is running. While a restore is
+        # pending the output state is worth every tick: it decides when the
+        # output can be handed back.
+        if self._pending_output_restore or self._poll_tick % 5 == 0:
             self._laser_on = self._read_optional(
                 "output state", "is_laser_on", getattr(self, "_laser_on", False)
             )
@@ -531,9 +547,6 @@ class LaserWorker(QObject):
             self._output_path = self._read_optional(
                 "output path", "get_output_path", getattr(self, "_output_path", "")
             )
-        if self._hold_output_on:
-            self._enforce_output_hold(sweeping)
-
         self._poll_tick += 1
         self.state_polled.emit({
             "wavelength_nm": wavelength_nm,
@@ -550,42 +563,57 @@ class LaserWorker(QObject):
             if not sweeping:
                 self.status.emit("Sweep finished")
 
-    def _enforce_output_hold(self, sweeping: bool) -> None:
-        """Switch the output back on if the running sweep dropped it.
+        # Last, so that anything it has to say about the output is the message
+        # left standing in the status bar rather than "Sweep finished".
+        if self._pending_output_restore:
+            self._settle_output_around_sweep(sweeping)
 
-        Armed by :meth:`start_sweep`, and only when the output was on before
-        the sweep — this hands back a state the user asked for, it never
-        enables an output they left off. It is released as soon as the sweep
-        ends, and it gives up after :attr:`MAX_HOLD_ATTEMPTS` so it can never
-        sit there fighting an instrument, or an operator at the front panel,
-        that wants the output off.
+    def _settle_output_around_sweep(self, sweeping: bool) -> None:
+        """Hand the output back once the sweep has let go of it.
+
+        The module owns the output while it sweeps: it takes the output down
+        to retune and answers ``:OUTP:STAT 1`` with an execution error until
+        the sweep ends. So a running sweep is reported, not argued with, and
+        the output the user had on is restored once the sweep is over.
+
+        Armed by :meth:`start_sweep`, and only when the output was on
+        beforehand — this hands back a state the user asked for, it never
+        enables an output they left off.
         """
         if sweeping:
-            self._hold_saw_sweeping = True
-        elif (self._hold_saw_sweeping
-                or self._poll_tick - self._hold_armed_tick > self.HOLD_GRACE_POLLS):
-            # Either the sweep has finished, or it never started.
-            self._release_output_hold()
+            self._saw_sweeping = True
+            if not getattr(self, "_laser_on", False) and not self._announced_output_off:
+                self._announced_output_off = True
+                self.status.emit(
+                    "The module has taken the output off for the sweep — it "
+                    "does not accept output commands while sweeping. It will "
+                    "be switched back on when the sweep ends."
+                )
             return
+        if not self._saw_sweeping and (
+                self._poll_tick - self._armed_tick <= self.SWEEP_START_GRACE_POLLS):
+            return  # the sweep has not got going yet
 
+        # The sweep is over (or never started), so the output is ours again.
         if getattr(self, "_laser_on", False):
+            self._clear_pending_restore()
             return
-        if self._poll_tick < self._hold_next_attempt_tick:
+        if self._poll_tick < self._next_attempt_tick:
             return
-        if self._hold_attempts >= self.MAX_HOLD_ATTEMPTS:
-            self._release_output_hold()
+        if self._restore_attempts >= self.MAX_RESTORE_ATTEMPTS:
+            self._clear_pending_restore()
             self.error.emit(
-                "The module keeps switching the output off during the sweep, "
-                f"over {self.MAX_HOLD_ATTEMPTS} attempts to switch it back on. "
-                "Left off — check the error queue and the sweep mode."
+                "The output is still off after "
+                f"{self.MAX_RESTORE_ATTEMPTS} attempts to switch it back on "
+                "once the sweep ended. Left off — check the error queue."
             )
             return
-        self._hold_attempts += 1
-        self._hold_next_attempt_tick = self._poll_tick + self.HOLD_RETRY_POLLS
+        self._restore_attempts += 1
+        self._next_attempt_tick = self._poll_tick + self.RESTORE_RETRY_POLLS
         if not self._restore_output():
             # The module said why, so there is nothing to be gained by asking
             # it again — the reason is already in front of the user.
-            self._release_output_hold()
+            self._clear_pending_restore()
 
     def _on_poll_failure(self, exc: Exception) -> None:
         """Absorb a failed poll, giving up only once they keep failing.
