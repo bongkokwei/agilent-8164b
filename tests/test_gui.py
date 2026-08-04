@@ -313,12 +313,73 @@ def test_sweep_start_keeps_the_output_the_module_drops(qapp, window, visa):
     window.sweep_panel.start_button.click()
     _spin(qapp, 300)
 
-    # The output comes back only after the sweep is running, so the module is
-    # not asked to emit while it is still taking its parameters.
+    # The output is handed back after the parameter writes and before the
+    # sweep is started, so the sweep never runs dark.
+    assert visa._output_on
+    on_again = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 1")
+    assert on_again > visa.writes.index(":SOUR0:CHAN1:WAV:SWE:MODE STEP")
+    assert on_again < visa.writes.index(":SOUR0:CHAN1:WAV:SWE:STAT START")
+    assert window.output_panel.laser_button.isChecked()
+
+
+def test_output_dropped_after_the_sweep_starts_is_switched_back_on(qapp, window, visa):
+    # The module acknowledges the start command with the output still on and
+    # only goes dark once it retunes, so the check at start time sees nothing.
+    visa.SWEEP_POLLS = 40
+    visa.drop_output_after_sweep_polls = 2
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+
+    window.sweep_panel.start_button.click()
+    for _ in range(100):
+        _spin(qapp, 20)
+        if visa._sweep_polls_seen > 2 and visa._output_on:
+            break
+
     assert visa._output_on
     on_again = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 1")
     assert on_again > visa.writes.index(":SOUR0:CHAN1:WAV:SWE:STAT START")
-    assert window.output_panel.laser_button.isChecked()
+
+
+def test_a_module_that_insists_on_the_output_being_off_is_left_alone(qapp, window, visa):
+    visa.SWEEP_POLLS = 60
+    visa.drop_output_every_sweep_poll = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+    switch_ons = visa.writes.count(":OUTP0:CHAN1:STAT 1")
+
+    window.sweep_panel.start_button.click()
+    for _ in range(100):
+        _spin(qapp, 20)
+        if not window.worker._hold_output_on:
+            break
+
+    # It argues briefly, then stops rather than fighting the instrument.
+    attempts = visa.writes.count(":OUTP0:CHAN1:STAT 1") - switch_ons
+    assert attempts <= window.worker.MAX_HOLD_ATTEMPTS + 1  # +1 for the pre-START one
+    assert "keeps switching the output off" in window.status_label.text()
+
+
+def test_switching_the_output_off_wins_over_the_hold(qapp, window, visa):
+    # The hold must never switch an output back on that the user has just
+    # switched off, however keen the sweep is to keep emitting.
+    visa.SWEEP_POLLS = 60
+    visa.drop_output_after_sweep_polls = 2
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 100)
+    assert window.worker._hold_output_on
+
+    window.laser_off_action.trigger()
+    _spin(qapp, 300)
+
+    assert not window.worker._hold_output_on
+    assert not visa._output_on
+    off_at = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 0")
+    assert ":OUTP0:CHAN1:STAT 1" not in visa.writes[off_at:]
 
 
 def test_sweep_start_leaves_a_disabled_output_off(qapp, window, visa):

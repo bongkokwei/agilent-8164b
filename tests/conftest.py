@@ -34,6 +34,13 @@ class StubVisaResource:
         #: Modules retune when the sweep parameters are written and switch the
         #: optical output off while they do. Set this to reproduce that.
         self.output_drops_on_sweep_config = False
+        #: Drop the output once, this many sweep-state polls after the sweep
+        #: started. Models a module that goes dark while it retunes to the
+        #: start wavelength, i.e. after the start command was acknowledged.
+        self.drop_output_after_sweep_polls = None
+        #: Drop the output on every sweep-state poll — a module that simply
+        #: refuses to emit while sweeping.
+        self.drop_output_every_sweep_poll = False
         #: Query fragments this module does not implement. A matching query
         #: raises the way a real one times out — modules vary in what they
         #: answer, and a single-output module has no ``:OUTP:PATH?``.
@@ -58,6 +65,7 @@ class StubVisaResource:
         self._sweep_stop_m = 1580e-9
         self._sweeping = False
         self._sweep_polls_left = 0
+        self._sweep_polls_seen = 0
         self._input_trigger = "IGN"
         self._trigger_config = "DIS"
         self._am_source = 0        # numeric code, as :AM:SOUR? reports it
@@ -104,6 +112,7 @@ class StubVisaResource:
             if action == "START":
                 self._sweeping = True
                 self._sweep_polls_left = self.SWEEP_POLLS
+                self._sweep_polls_seen = 0
             elif action == "STOP":
                 self._sweeping = False
                 self._sweep_polls_left = 0
@@ -154,6 +163,10 @@ class StubVisaResource:
             return self._path
         if ":WAV:SWE:STAT?" in upper:
             if self._sweeping:
+                self._sweep_polls_seen += 1
+                if (self.drop_output_every_sweep_poll
+                        or self._sweep_polls_seen == self.drop_output_after_sweep_polls):
+                    self._output_on = False
                 self._sweep_polls_left -= 1
                 if self._sweep_polls_left <= 0:
                     self._sweeping = False

@@ -103,8 +103,12 @@ laser source module. It measures nothing, because the module has no detector.
   before it will start, so a bad range never reaches the hardware. Setting
   `Cycles` to 0 (shown as `Infinite`) sweeps until you press `Stop`. If the
   module drops the optical output while it takes the sweep parameters, the
-  output is switched back on once the sweep is running — an output that was
-  already off stays off.
+  output is handed back before the sweep is started, and a drop that happens
+  later — while the module retunes to the start wavelength — is caught by the
+  poll loop and switched back on. Only an output that was on beforehand is
+  ever restored, the hold is released the moment the sweep ends or you touch
+  the output yourself, and it gives up after three attempts rather than
+  fighting a module that insists on staying dark.
 - **Modulation** — the module's External Modulation menu: external digital and
   external analog (both driven through the BNC input on the laser module),
   wavelength locking, backplane, coherence control, plus Off. Selecting a mode
