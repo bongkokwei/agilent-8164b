@@ -162,6 +162,9 @@ class Agilent8164B:
         mode: 'step' (stepped sweep, uses step_nm/dwell_s) or 'continuous'
         (uses speed_nm_s). repeat: 'oneway' or 'twoway'.
 
+        cycles is the number of sweep cycles to run; 0 repeats the sweep
+        until stop_sweep() is called.
+
         In continuous mode step_nm does not step the laser -- it sets the
         wavelength spacing between output triggers, so the implied trigger
         frequency is speed_nm_s/step_nm. That is rejected up front when it
@@ -173,6 +176,10 @@ class Agilent8164B:
             "dwell=%s s, cycles=%d, repeat=%s",
             mode, start_nm, stop_nm, step_nm, speed_nm_s, dwell_s, cycles, repeat,
         )
+        if cycles < 0:
+            raise ValueError(
+                f"cycles must be 0 (sweep until stopped) or greater, got {cycles}"
+            )
         if mode.lower() in ("continuous", "cont") and check_trigger_freq:
             self._validate_trigger_freq(step_nm, speed_nm_s)
         prefix = self._sweep_prefix()

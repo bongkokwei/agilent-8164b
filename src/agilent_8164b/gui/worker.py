@@ -10,6 +10,7 @@ I/O and the interface stays responsive during a long sweep.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 from typing import Optional
 
@@ -27,7 +28,7 @@ class SweepConfig:
     step_nm: float = 1.0
     speed_nm_s: float = 10.0
     dwell_s: float = 0.1
-    cycles: int = 1
+    cycles: int = 1          # 0 sweeps until it is stopped
     mode: str = "step"       # 'step' or 'continuous'
     repeat: str = "oneway"   # 'oneway' or 'twoway'
 
@@ -161,6 +162,34 @@ class LaserWorker(QObject):
     def _failed(self, result) -> bool:
         return result is self.FAILED
 
+    @contextmanager
+    def _output_preserved(self):
+        """Leave the optical output in the state it was in on entry.
+
+        Writing the sweep parameters makes the module retune, and it switches
+        the output off while it does — so configuring or starting a sweep
+        silently kills the beam the user had just enabled. The output is only
+        ever restored, never enabled on its own: if it was off on entry it
+        stays off.
+        """
+        state = self._call("read the output state", self._inst.is_laser_on)
+        was_on = bool(state) if not self._failed(state) else False
+        try:
+            yield
+        finally:
+            if was_on:
+                self._restore_output()
+
+    def _restore_output(self) -> None:
+        """Switch the output back on if the instrument dropped it."""
+        state = self._call("read the output state", self._inst.is_laser_on)
+        if self._failed(state) or state:
+            return
+        if self._failed(self._call("switch the laser back on", self._inst.laser_on)):
+            return
+        self._laser_on = True
+        self.status.emit("Output switched back on after the sweep turned it off")
+
     # -- output control ------------------------------------------------
     @pyqtSlot(bool)
     def set_laser_on(self, on: bool) -> None:
@@ -286,8 +315,11 @@ class LaserWorker(QObject):
         if self._inst is None:
             self.error.emit("Not connected — cannot configure the sweep.")
             return
-        if self._failed(self._call("configure the sweep", self._inst.configure_sweep,
-                                   **config.as_kwargs())):
+        with self._output_preserved():
+            failed = self._failed(self._call("configure the sweep",
+                                             self._inst.configure_sweep,
+                                             **config.as_kwargs()))
+        if failed:
             return
         self.status.emit(
             f"Sweep configured: {config.start_nm:g}–{config.stop_nm:g} nm ({config.mode})"
@@ -308,19 +340,24 @@ class LaserWorker(QObject):
         if self._inst is None:
             self.error.emit("Not connected — cannot start a sweep.")
             return
-        if config is not None:
-            if self._failed(self._call("configure the sweep", self._inst.configure_sweep,
-                                       **config.as_kwargs())):
+        # Everything from here to the running sweep can make the module drop
+        # the output; the guard hands it back at the end, whichever step it is.
+        with self._output_preserved():
+            if config is not None:
+                if self._failed(self._call("configure the sweep",
+                                           self._inst.configure_sweep,
+                                           **config.as_kwargs())):
+                    return
+            result = self._call("check the sweep parameters",
+                                self._inst.check_sweep_params)
+            if self._failed(result):
                 return
-        result = self._call("check the sweep parameters", self._inst.check_sweep_params)
-        if self._failed(result):
-            return
-        self.sweep_checked.emit(result)
-        if result != "OK":
-            self.error.emit(f"Sweep not started — {result}")
-            return
-        if self._failed(self._call("start the sweep", self._inst.start_sweep)):
-            return
+            self.sweep_checked.emit(result)
+            if result != "OK":
+                self.error.emit(f"Sweep not started — {result}")
+                return
+            if self._failed(self._call("start the sweep", self._inst.start_sweep)):
+                return
         self._was_sweeping = True
         self.sweep_running_changed.emit(True)
         self.status.emit("Sweep started")

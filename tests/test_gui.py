@@ -261,6 +261,60 @@ def test_bad_sweep_range_is_reported_and_not_started(qapp, window, visa):
     assert not _commands(visa, ":STAT START")
 
 
+def test_sweep_start_keeps_the_output_the_module_drops(qapp, window, visa):
+    visa.output_drops_on_sweep_config = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+    assert visa._output_on
+
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 300)
+
+    # The output comes back only after the sweep is running, so the module is
+    # not asked to emit while it is still taking its parameters.
+    assert visa._output_on
+    on_again = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 1")
+    assert on_again > visa.writes.index(":SOUR0:CHAN1:WAV:SWE:STAT START")
+    assert window.output_panel.laser_button.isChecked()
+
+
+def test_sweep_start_leaves_a_disabled_output_off(qapp, window, visa):
+    visa.output_drops_on_sweep_config = True
+    _connect(qapp, window)
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 300)
+
+    assert ":SOUR0:CHAN1:WAV:SWE:STAT START" in visa.writes
+    assert not visa._output_on
+    assert ":OUTP0:CHAN1:STAT 1" not in visa.writes
+
+
+def test_sweep_check_keeps_the_output_the_module_drops(qapp, window, visa):
+    visa.output_drops_on_sweep_config = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+
+    window.sweep_panel.check_button.click()
+    _spin(qapp, 300)
+
+    assert window.sweep_panel.check_label.text() == "Parameters OK"
+    assert visa._output_on
+
+
+def test_zero_cycles_means_an_infinite_sweep(qapp, window, visa):
+    _connect(qapp, window)
+    window.sweep_panel.cycles_spin.setValue(0)
+    assert window.sweep_panel.cycles_spin.text() == "Infinite"
+    assert window.sweep_panel.config().cycles == 0
+
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 200)
+
+    assert ":SOUR0:CHAN1:WAV:SWE:CYCL 0" in visa.writes
+
+
 def test_emergency_off_stops_sweep_and_output(qapp, window, visa):
     _connect(qapp, window)
     window.output_panel.laser_button.setChecked(True)

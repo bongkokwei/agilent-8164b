@@ -31,6 +31,9 @@ class StubVisaResource:
     SWEEP_POLLS = 3
 
     def __init__(self):
+        #: Modules retune when the sweep parameters are written and switch the
+        #: optical output off while they do. Set this to reproduce that.
+        self.output_drops_on_sweep_config = False
         self.timeout = None
         self.read_termination = None
         self.write_termination = None
@@ -89,10 +92,13 @@ class StubVisaResource:
                 self._sweep_polls_left = 0
         elif ":WAV:SWE:STAR" in upper:
             self._sweep_start_m = self._value_nm(command) * 1e-9
+            self._maybe_drop_output()
         elif ":WAV:SWE:STOP" in upper:
             self._sweep_stop_m = self._value_nm(command) * 1e-9
+            self._maybe_drop_output()
         elif ":WAV:SWE" in upper:
-            pass  # MODE/STEP/DWEL/SPE/CYCL/REP are recorded, not modelled
+            # MODE/STEP/DWEL/SPE/CYCL/REP are recorded, not modelled.
+            self._maybe_drop_output()
         elif ":WAV" in upper:
             self._wavelength_m = self._value_nm(command) * 1e-9
         elif ":POW:UNIT" in upper:
@@ -114,6 +120,10 @@ class StubVisaResource:
             self.__init__()
         elif upper.startswith("*CLS"):
             pass
+
+    def _maybe_drop_output(self) -> None:
+        if self.output_drops_on_sweep_config:
+            self._output_on = False
 
     def _respond(self, command: str):
         upper = command.upper()
