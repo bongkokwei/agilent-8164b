@@ -34,6 +34,29 @@ class StubVisaResource:
         #: Modules retune when the sweep parameters are written and switch the
         #: optical output off while they do. Set this to reproduce that.
         self.output_drops_on_sweep_config = False
+        #: Drop the output once, this many sweep-state polls after the sweep
+        #: started. Models a module that goes dark while it retunes to the
+        #: start wavelength, i.e. after the start command was acknowledged.
+        self.drop_output_after_sweep_polls = None
+        #: Drop the output on every sweep-state poll — a module that simply
+        #: refuses to emit while sweeping.
+        self.drop_output_every_sweep_poll = False
+        #: Ignore ``:OUTP:STAT 1`` while a sweep is running and queue an
+        #: execution error, the way a module that owns the output during a
+        #: sweep does.
+        self.output_locked_while_sweeping = False
+        #: Ignore ``:OUTP:STAT 1`` outright, sweep or no sweep — an open
+        #: interlock, say. The error queue carries the reason.
+        self.refuse_output_on = False
+        #: Query fragments this module does not implement. A matching query
+        #: raises the way a real one times out — modules vary in what they
+        #: answer, and a single-output module has no ``:OUTP:PATH?``.
+        self.unsupported_queries: set = set()
+        #: Fail this many upcoming queries, whatever they are, then behave.
+        #: Models a transient timeout rather than a missing feature.
+        self.failing_queries = 0
+        #: Counts ``clear()`` calls, i.e. session resynchronisations.
+        self.clears = 0
         self.timeout = None
         self.read_termination = None
         self.write_termination = None
@@ -49,10 +72,12 @@ class StubVisaResource:
         self._sweep_stop_m = 1580e-9
         self._sweeping = False
         self._sweep_polls_left = 0
+        self._sweep_polls_seen = 0
         self._input_trigger = "IGN"
         self._trigger_config = "DIS"
         self._am_source = 0        # numeric code, as :AM:SOUR? reports it
         self._am_on = False
+        self._errors: list[str] = []
 
     # -- PyVISA surface ------------------------------------------------
     def write(self, command: str) -> None:
@@ -61,10 +86,18 @@ class StubVisaResource:
 
     def query(self, command: str) -> str:
         self.writes.append(command)
+        if self.failing_queries > 0:
+            self.failing_queries -= 1
+            raise TimeoutError(f"VI_ERROR_TMO on {command!r}")
+        if any(fragment in command.upper() for fragment in self.unsupported_queries):
+            raise TimeoutError(f"VI_ERROR_TMO on {command!r}")
         response = self._respond(command)
         if response is None:
             raise AssertionError(f"stub received an unrecognised query: {command!r}")
         return response
+
+    def clear(self) -> None:
+        self.clears += 1
 
     def close(self) -> None:
         self.closed = True
@@ -79,7 +112,15 @@ class StubVisaResource:
     def _apply(self, command: str) -> None:
         upper = command.upper()
         if ":OUTP" in upper and ":STAT" in upper:
-            self._output_on = upper.rstrip().endswith("1")
+            switch_on = upper.rstrip().endswith("1")
+            refused = switch_on and (
+                self.refuse_output_on
+                or (self.output_locked_while_sweeping and self._sweeping)
+            )
+            if refused:
+                self._errors.append('-200,"Execution error (StatExecError)"')
+            else:
+                self._output_on = switch_on
         elif ":OUTP" in upper and ":PATH" in upper:
             self._path = upper.rsplit(" ", 1)[-1]
         elif ":WAV:SWE:STAT" in upper:
@@ -87,6 +128,7 @@ class StubVisaResource:
             if action == "START":
                 self._sweeping = True
                 self._sweep_polls_left = self.SWEEP_POLLS
+                self._sweep_polls_seen = 0
             elif action == "STOP":
                 self._sweeping = False
                 self._sweep_polls_left = 0
@@ -130,13 +172,17 @@ class StubVisaResource:
         if upper.startswith("*IDN?"):
             return "HEWLETT-PACKARD,8164B,MY12345678,1.0"
         if upper.startswith(":SYST:ERR?"):
-            return '+0,"No error"'
+            return self._errors.pop(0) if self._errors else '+0,"No error"'
         if ":OUTP" in upper and ":STAT?" in upper:
             return "+1" if self._output_on else "+0"
         if ":OUTP" in upper and ":PATH?" in upper:
             return self._path
         if ":WAV:SWE:STAT?" in upper:
             if self._sweeping:
+                self._sweep_polls_seen += 1
+                if (self.drop_output_every_sweep_poll
+                        or self._sweep_polls_seen == self.drop_output_after_sweep_polls):
+                    self._output_on = False
                 self._sweep_polls_left -= 1
                 if self._sweep_polls_left <= 0:
                     self._sweeping = False

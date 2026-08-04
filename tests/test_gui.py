@@ -145,6 +145,48 @@ def test_setting_wavelength_updates_readout(qapp, window, visa):
     assert "1543.21" in window.readout_panel.wavelength_value.text()
 
 
+def test_readout_survives_a_query_the_module_does_not_answer(qapp, window, visa):
+    # A single-output module has no :OUTP:PATH?, and that must not take the
+    # wavelength and power readings down with it.
+    visa.unsupported_queries = {":PATH?"}
+    _connect(qapp, window)
+    _spin(qapp, 400)
+
+    assert window.readout_panel.wavelength_value.text() != "—"
+    assert window.readout_panel.power_value.text() != "—"
+    assert window.worker._poll_timer.isActive()
+
+    # The unanswered reading is dropped rather than costing a timeout forever.
+    attempts = len(_commands(visa, ":PATH?"))
+    assert attempts == window.worker.MAX_OPTIONAL_FAILURES
+    _spin(qapp, 400)
+    assert len(_commands(visa, ":PATH?")) == attempts
+
+
+def test_readout_recovers_from_a_transient_timeout(qapp, window, visa):
+    _connect(qapp, window)
+    _spin(qapp, 100)
+    visa.failing_queries = 2
+    _spin(qapp, 400)
+
+    assert window.worker._poll_timer.isActive()
+    assert visa.clears > 0  # the session was resynchronised, not left confused
+    assert window.readout_panel.wavelength_value.text() != "—"
+
+
+def test_polling_gives_up_once_the_failures_persist(qapp, window, visa):
+    _connect(qapp, window)
+    _spin(qapp, 100)
+    visa.failing_queries = 10 * window.worker.MAX_POLL_FAILURES
+    for _ in range(100):
+        _spin(qapp, 20)
+        if not window.worker._poll_timer.isActive():
+            break
+
+    assert not window.worker._poll_timer.isActive()
+    assert "Polling stopped" in window.status_label.text()
+
+
 def test_setting_power_sends_unit_suffix(qapp, window, visa):
     _connect(qapp, window)
     window.output_panel.power_spin.setValue(2.5)
@@ -271,12 +313,104 @@ def test_sweep_start_keeps_the_output_the_module_drops(qapp, window, visa):
     window.sweep_panel.start_button.click()
     _spin(qapp, 300)
 
-    # The output comes back only after the sweep is running, so the module is
-    # not asked to emit while it is still taking its parameters.
+    # The output is handed back after the parameter writes and before the
+    # sweep is started, so the sweep never runs dark.
+    assert visa._output_on
+    on_again = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 1")
+    assert on_again > visa.writes.index(":SOUR0:CHAN1:WAV:SWE:MODE STEP")
+    assert on_again < visa.writes.index(":SOUR0:CHAN1:WAV:SWE:STAT START")
+    assert window.output_panel.laser_button.isChecked()
+
+
+def test_output_dropped_by_the_sweep_comes_back_when_it_ends(qapp, window, visa):
+    # The module takes the output down once it starts retuning, after the
+    # start command was acknowledged, and holds on to it until the sweep ends.
+    visa.SWEEP_POLLS = 6
+    visa.drop_output_after_sweep_polls = 2
+    visa.output_locked_while_sweeping = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+
+    window.sweep_panel.start_button.click()
+    for _ in range(200):
+        _spin(qapp, 20)
+        if not visa._sweeping and visa._output_on:
+            break
+
     assert visa._output_on
     on_again = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 1")
     assert on_again > visa.writes.index(":SOUR0:CHAN1:WAV:SWE:STAT START")
-    assert window.output_panel.laser_button.isChecked()
+
+
+def test_the_running_sweep_owns_the_output(qapp, window, visa):
+    # Asking a sweeping module for the output back only earns an execution
+    # error, so it is reported once and not argued with.
+    visa.SWEEP_POLLS = 60
+    visa.drop_output_every_sweep_poll = True
+    visa.output_locked_while_sweeping = True
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+    switch_ons = visa.writes.count(":OUTP0:CHAN1:STAT 1")
+
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 600)
+
+    assert visa._sweeping
+    assert visa.writes.count(":OUTP0:CHAN1:STAT 1") == switch_ons
+    assert "does not accept output commands while sweeping" in window.status_label.text()
+
+    # Stopping hands the output back, because the sweep has let go of it.
+    visa.drop_output_every_sweep_poll = False
+    window.sweep_panel.stop_button.click()
+    for _ in range(100):
+        _spin(qapp, 20)
+        if visa._output_on:
+            break
+    assert visa._output_on
+
+
+def test_an_output_that_will_not_come_back_reports_the_reason(qapp, window, visa):
+    # Whatever the module objects to — an open interlock, say — the user gets
+    # its own words rather than a silent retry loop.
+    visa.SWEEP_POLLS = 4
+    visa.drop_output_after_sweep_polls = 1
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    _spin(qapp, 200)
+    switch_ons = visa.writes.count(":OUTP0:CHAN1:STAT 1")
+    visa.refuse_output_on = True
+
+    window.sweep_panel.start_button.click()
+    for _ in range(200):
+        _spin(qapp, 20)
+        if not window.worker._pending_output_restore:
+            break
+
+    assert "Execution error" in window.status_label.text()
+    # One attempt, one answer — no hammering away at a refusal.
+    assert visa.writes.count(":OUTP0:CHAN1:STAT 1") - switch_ons == 1
+
+
+def test_switching_the_output_off_cancels_the_restore(qapp, window, visa):
+    # The restore must never switch an output back on that the user has just
+    # switched off, however keen the sweep was to keep emitting.
+    visa.SWEEP_POLLS = 60
+    visa.drop_output_after_sweep_polls = 2
+    _connect(qapp, window)
+    window.output_panel.laser_button.setChecked(True)
+    window.sweep_panel.start_button.click()
+    _spin(qapp, 100)
+    assert window.worker._pending_output_restore
+
+    window.laser_off_action.trigger()
+    _spin(qapp, 300)
+
+    assert not window.worker._pending_output_restore
+    assert not visa._output_on
+    off_at = len(visa.writes) - 1 - visa.writes[::-1].index(":OUTP0:CHAN1:STAT 0")
+    assert ":OUTP0:CHAN1:STAT 1" not in visa.writes[off_at:]
 
 
 def test_sweep_start_leaves_a_disabled_output_off(qapp, window, visa):
