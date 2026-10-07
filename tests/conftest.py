@@ -169,6 +169,8 @@ class StubVisaResource:
 
     def _respond(self, command: str):
         upper = command.upper()
+        if upper.startswith("*OPC?"):
+            return "1"
         if upper.startswith("*IDN?"):
             return "HEWLETT-PACKARD,8164B,MY12345678,1.0"
         if upper.startswith(":SYST:ERR?"):

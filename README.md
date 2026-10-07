@@ -52,7 +52,7 @@ with Agilent8164B("GPIB0::21::INSTR", slot=0, channel=1) as laser:
 | `identify()` | Query `*IDN?` |
 | `reset()` | Send `*RST` |
 | `laser_on()` / `laser_off()` / `is_laser_on()` | Control/query output state |
-| `set_wavelength_nm(nm)` / `get_wavelength_nm()` | Set/get wavelength in nm |
+| `set_wavelength_nm(nm, wait=False)` / `get_wavelength_nm()` | Set/get wavelength in nm; `wait=True` blocks on `*OPC?` until the module has settled |
 | `set_power(value, unit)` / `get_power()` | Set/get output power (`dBm`, `mW`, `uW`, `nW`) |
 | `set_power_unit(unit)` / `get_power_unit()` | Set/get the power display unit |
 | `set_output_path(path)` / `get_output_path()` | Set/get output path (`high`, `lowsse`, `both_high`, `both_low`) — for dual-output modules |

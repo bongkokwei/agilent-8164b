@@ -123,9 +123,18 @@ class Agilent8164B:
         return state
 
     # -- wavelength (metres, as per SCPI default) -------------------------
-    def set_wavelength_nm(self, wavelength_nm: float) -> None:
+    def set_wavelength_nm(self, wavelength_nm: float, *, wait: bool = False) -> None:
+        """Set the wavelength in nm.
+
+        The write returns before the module has finished tuning. Pass
+        ``wait=True`` to block on ``*OPC?`` until it has settled; the wait is
+        bounded by the VISA timeout, so allow for the tuning time there.
+        """
         logger.info("Setting wavelength to %g nm", wavelength_nm)
         self._write(f"{self._prefix()}:WAV {wavelength_nm}NM")
+        if wait:
+            self._query("*OPC?")
+            logger.debug("Wavelength settled at %g nm", wavelength_nm)
 
     def get_wavelength_nm(self) -> float:
         metres = float(self._query(f"{self._prefix()}:WAV?"))
